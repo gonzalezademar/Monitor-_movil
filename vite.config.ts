@@ -5,5 +5,5 @@ import react from '@vitejs/plugin-react'
 // base: '/Monitoreo_Movil/' es necesario para que GitHub Pages funcione correctamente
 export default defineConfig({
   plugins: [react()],
-  base: '/Monitoreo_Movil/',
+  base: '/Monitor-_movil/',
 })
