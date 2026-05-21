@@ -1,0 +1,122 @@
+:root {
+  --glass-bg: rgba(255, 255, 255, 0.1);
+  --glass-border: rgba(255, 255, 255, 0.2);
+  --primary-color: #4f46e5;
+  --secondary-color: #ec4899;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: linear-gradient(135deg, #1e1b4b, #312e81);
+  color: white;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.onboarding-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  padding: 20px;
+}
+
+.glass-panel {
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  padding: 30px;
+  text-align: center;
+  width: 100%;
+  max-width: 400px;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+.glass-input {
+  width: 100%;
+  padding: 15px;
+  margin: 20px 0;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: rgba(0,0,0,0.2);
+  color: white;
+  font-size: 16px;
+  outline: none;
+}
+
+.glass-btn {
+  width: 100%;
+  padding: 15px;
+  border: none;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  margin-bottom: 10px;
+  transition: transform 0.2s, opacity 0.2s;
+}
+
+.glass-btn:active { transform: scale(0.95); }
+
+.glass-btn.primary {
+  background: var(--primary-color);
+  color: white;
+}
+
+.glass-btn.secondary {
+  background: transparent;
+  border: 2px solid var(--secondary-color);
+  color: white;
+}
+
+.dashboard-container {
+  position: relative;
+  height: 100vh;
+}
+
+.floating-panel {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 90%;
+  z-index: 1000;
+}
+
+.client-container {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+}
+
+.sos-btn {
+  width: 200px;
+  height: 200px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ff0000, #990000);
+  border: 10px solid rgba(255,0,0,0.3);
+  color: white;
+  font-size: 32px;
+  font-weight: 900;
+  box-shadow: 0 0 50px rgba(255,0,0,0.5);
+  cursor: pointer;
+  outline: none;
+}
+
+.sos-btn:active {
+  transform: scale(0.95);
+  box-shadow: 0 0 100px rgba(255,0,0,0.8);
+}
+
+.blackout-screen {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: black;
+  z-index: 9999;
+}
