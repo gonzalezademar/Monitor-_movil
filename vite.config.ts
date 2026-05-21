@@ -1,9 +1,9 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// https://vite.dev/config/
-// base: '/Monitoreo_Movil/' es necesario para que GitHub Pages funcione correctamente
+// VITE_BASE_URL=/Monitor-_movil/ → para GitHub Pages
+// VITE_BASE_URL no definida (o ./)  → para APK con Capacitor
 export default defineConfig({
   plugins: [react()],
-  base: '/Monitor-_movil/',
+  base: process.env.VITE_BASE_URL ?? './',
 })
