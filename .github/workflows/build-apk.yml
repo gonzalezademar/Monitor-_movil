@@ -51,14 +51,17 @@ jobs:
 
       # 7. Inicializar el proyecto Android de Capacitor
       - name: 🏗️ Inicializar proyecto Android (Capacitor)
-        run: npx cap add android
+        run: |
+          git config --global user.email "ci@github.com"
+          git config --global user.name "GitHub Actions"
+          ./node_modules/.bin/cap add android
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
       # 8. Sincronizar el build web dentro del proyecto Android
       - name: 🔄 Sincronizar web con Capacitor
-        run: npx cap sync android
+        run: ./node_modules/.bin/cap sync android
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
