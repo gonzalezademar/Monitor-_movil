@@ -4,7 +4,7 @@ import L from 'leaflet';
 import { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
-import QRCode from 'react-qr-code';
+import { QRCode } from 'react-qr-code';
 
 // FIX: Leaflet no resuelve sus íconos PNG en Vite/Capacitor builds.
 // Se importan como módulos ES para que Vite los procese y hashee correctamente.

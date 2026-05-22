@@ -1,7 +1,7 @@
 import { useStore } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
-import QRCode from 'react-qr-code';
+import { QRCode } from 'react-qr-code';
 import { Scanner } from '@yudiel/react-qr-scanner';
 
 export default function Onboarding() {
