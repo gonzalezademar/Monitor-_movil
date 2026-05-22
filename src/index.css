@@ -12,7 +12,7 @@ body {
   background: linear-gradient(135deg, #1e1b4b, #312e81);
   color: white;
   height: 100vh;
-  overflow: hidden;
+  /* FIX: overflow:hidden movido a .dashboard-container — conflicta con Leaflet */
 }
 
 .onboarding-container {
@@ -73,9 +73,17 @@ body {
   color: white;
 }
 
+.role-buttons {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  margin-top: 4px;
+}
+
 .dashboard-container {
   position: relative;
   height: 100vh;
+  overflow: hidden; /* FIX: overflow contenido en el mapa, no en el body global */
 }
 
 .floating-panel {
@@ -85,6 +93,8 @@ body {
   transform: translateX(-50%);
   width: 90%;
   z-index: 1000;
+  max-height: 60vh;
+  overflow-y: auto;
 }
 
 .client-container {
@@ -93,6 +103,45 @@ body {
   justify-content: center;
   align-items: center;
   height: 100vh;
+  gap: 0;
+}
+
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  margin-bottom: 28px;
+  opacity: 0.8;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: #fbbf24;
+  display: inline-block;
+  flex-shrink: 0;
+  animation: dotPulse 2s ease-in-out infinite;
+}
+
+@keyframes dotPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.35; transform: scale(0.8); }
+}
+
+.helper-text {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+  margin-top: 14px;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.sos-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .sos-btn {

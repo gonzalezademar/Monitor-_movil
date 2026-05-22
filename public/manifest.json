@@ -2,6 +2,7 @@
   "name": "Radar Familiar",
   "short_name": "Radar",
   "description": "Sistema de monitoreo familiar P2P privado y local",
+  "author": "Adelio González",
   "start_url": "/Monitor-_movil/",
   "scope": "/Monitor-_movil/",
   "display": "standalone",

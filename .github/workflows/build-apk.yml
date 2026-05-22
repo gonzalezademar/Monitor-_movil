@@ -59,7 +59,12 @@ jobs:
           ANDROID_HOME: /usr/local/lib/android/sdk
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
-      # 8. Sincronizar el build web dentro del proyecto Android
+      # 8. Generar íconos Android personalizados desde resources/icon.png
+      - name: 🎨 Generar íconos Android personalizados
+        run: npx @capacitor/assets@latest generate --android
+        continue-on-error: true  # Si falla, el build continúa con íconos predeterminados
+
+      # 9. Sincronizar el build web dentro del proyecto Android
       - name: 🔄 Sincronizar web con Capacitor
         run: ./node_modules/.bin/cap sync android
         env:

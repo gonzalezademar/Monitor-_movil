@@ -12,6 +12,8 @@ interface AppState {
   setMyPeerId: (id: string) => void;
   isSOSActive: boolean;
   setSOSActive: (active: boolean) => void;
+  fenceRadius: number;
+  setFenceRadius: (r: number) => void;
   logout: () => void;
 }
 
@@ -28,7 +30,9 @@ export const useStore = create<AppState>()(
       setMyPeerId: (id) => set({ myPeerId: id }),
       isSOSActive: false,
       setSOSActive: (active) => set({ isSOSActive: active }),
-      logout: () => set({ role: null, userName: '', masterServerId: null, myPeerId: null })
+      fenceRadius: 100,
+      setFenceRadius: (r) => set({ fenceRadius: r }),
+      logout: () => set({ role: null, userName: '', masterServerId: null, myPeerId: null, isSOSActive: false, fenceRadius: 100 })
     }),
     {
       name: 'radar-storage',
