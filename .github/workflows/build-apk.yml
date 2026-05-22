@@ -39,7 +39,7 @@ jobs:
       - name: ☕ Configurar Java 17
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '21'
           distribution: 'temurin'
 
       # 6. ubuntu-latest ya tiene Android SDK. Solo verificamos y apuntamos la ruta.
