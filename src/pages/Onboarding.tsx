@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
 import { QRCode } from 'react-qr-code';
 import { Scanner } from '@yudiel/react-qr-scanner';
+import { ShieldAlert, User, QrCode, Scan, ArrowLeft, Camera, RefreshCcw, Radar } from 'lucide-react';
 
 export default function Onboarding() {
   const { setRole, setUserName, setMasterServerId, role } = useStore();
@@ -94,80 +95,117 @@ export default function Onboarding() {
   return (
     <div className="onboarding-container">
       <div className="glass-panel">
-        <h1>Radar Familiar</h1>
-        <p>Seguridad privada P2P</p>
+        
+        {/* Header - Siempre visible pero más compacto en pasos avanzados */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', marginBottom: step === 1 ? '10px' : '0' }}>
+          <div style={{ background: 'rgba(255,255,255,0.1)', padding: '12px', borderRadius: '50%' }}>
+            <Radar size={32} color="#ec4899" />
+          </div>
+          <div>
+            <h1 style={{ fontSize: step === 1 ? '24px' : '18px', fontWeight: 'bold', margin: 0, transition: 'all 0.3s' }}>
+              Radar Familiar
+            </h1>
+            {step === 1 && <p style={{ fontSize: '13px', opacity: 0.7, margin: '4px 0 0' }}>Seguridad privada P2P</p>}
+          </div>
+        </div>
 
         {step === 1 && (
-          <>
-            <input
-              type="text"
-              placeholder="Tu Nombre (Ej. Papá o Hijo)"
-              value={nameInput}
-              maxLength={50}
-              onChange={(e) => { setNameInput(e.target.value); setNameError(''); }}
-              className="glass-input"
-            />
-            {nameError && (
-              <p style={{ color: '#f87171', fontSize: '13px', marginTop: '-10px', marginBottom: '10px', textAlign: 'center' }}>
-                ⚠️ {nameError}
-              </p>
-            )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div>
+              <div style={{ position: 'relative' }}>
+                <User size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
+                <input
+                  type="text"
+                  placeholder="Tu Nombre (Ej. Papá o Hijo)"
+                  value={nameInput}
+                  maxLength={50}
+                  onChange={(e) => { setNameInput(e.target.value); setNameError(''); }}
+                  className="glass-input"
+                  style={{ paddingLeft: '44px', margin: 0 }}
+                />
+              </div>
+              {nameError && (
+                <p style={{ color: '#fca5a5', fontSize: '12px', marginTop: '6px', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <ShieldAlert size={14} /> {nameError}
+                </p>
+              )}
+            </div>
+
             <div className="role-buttons">
               <button className="glass-btn primary" onClick={() => handleSelectRole('monitor')}>
-                Soy Monitor (Padre)
+                <QrCode size={18} /> Soy Monitor (Padre)
               </button>
               <button className="glass-btn secondary" onClick={() => handleSelectRole('client')}>
-                Soy Rastreable (Hijo)
+                <Scan size={18} /> Soy Rastreable (Hijo)
               </button>
             </div>
-          </>
+          </div>
         )}
 
         {step === 2 && tempRole === 'monitor' && (
-          <div>
-            <h3>Tu Código de Servidor</h3>
-            <p>Escanea este QR con el teléfono de tu hijo:</p>
-            <div style={{ background: 'white', padding: '16px', borderRadius: '10px', display: 'inline-block', margin: '20px 0' }}>
-              <QRCode value={serverCode} size={200} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', alignItems: 'center' }}>
+            <div>
+              <h3 style={{ fontSize: '18px', margin: 0 }}>Tu Código</h3>
+              <p style={{ fontSize: '13px', opacity: 0.7, margin: '4px 0 0' }}>Escanea esto con el teléfono de tu hijo</p>
             </div>
-            <button className="glass-btn primary" onClick={finalizeMonitor}>Ir a mi Mapa</button>
-            <button className="glass-btn secondary" style={{ marginTop: '8px', opacity: 0.75 }} onClick={handleBack}>
-              ← Volver
-            </button>
+            
+            <div style={{ background: 'white', padding: '16px', borderRadius: '16px', display: 'inline-block', boxShadow: '0 4px 20px rgba(0,0,0,0.2)' }}>
+              <QRCode value={serverCode} size={180} />
+            </div>
+            
+            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <button className="glass-btn primary" onClick={finalizeMonitor}>
+                Ir a mi Mapa
+              </button>
+              <button className="glass-btn secondary" style={{ opacity: 0.75, border: 'none', background: 'rgba(255,255,255,0.05)' }} onClick={handleBack}>
+                <ArrowLeft size={16} /> Volver
+              </button>
+            </div>
           </div>
         )}
 
         {step === 2 && tempRole === 'client' && (
-          <div>
-            <h3>Escanear Código</h3>
-            <p>Apunta la cámara al código QR del Servidor.</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', alignItems: 'center', width: '100%' }}>
+            <div>
+              <h3 style={{ fontSize: '18px', margin: 0 }}>Escanear</h3>
+              <p style={{ fontSize: '13px', opacity: 0.7, margin: '4px 0 0' }}>Apunta al código QR del Padre</p>
+            </div>
 
             {cameraError ? (
-              <div style={{ marginTop: '20px', background: 'rgba(220,38,38,0.15)', border: '1px solid rgba(220,38,38,0.4)', borderRadius: '10px', padding: '16px' }}>
-                <p style={{ color: '#f87171', fontSize: '14px' }}>📷 {cameraError}</p>
-                <button className="glass-btn secondary" style={{ marginTop: '12px', fontSize: '13px' }} onClick={handleRetryCamera}>
-                  🔄 Reintentar cámara
+              <div className="error-card">
+                <Camera size={32} color="#fca5a5" />
+                <p style={{ color: '#fca5a5', fontSize: '13px', margin: 0 }}>
+                  No pudimos acceder a la cámara. Por favor, revisa los permisos.
+                </p>
+                <button 
+                  className="glass-btn secondary" 
+                  style={{ marginTop: '4px', fontSize: '14px', border: '1px solid rgba(252, 165, 165, 0.4)', color: '#fca5a5' }} 
+                  onClick={handleRetryCamera}
+                >
+                  <RefreshCcw size={14} /> Reintentar
                 </button>
               </div>
             ) : (
-              <div style={{ marginTop: '20px', borderRadius: '10px', overflow: 'hidden' }}>
+              <div style={{ width: '100%', maxWidth: '250px', borderRadius: '16px', overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.2)' }}>
                 <Scanner onScan={handleScan} onError={handleScanError} />
               </div>
             )}
 
             {scanError && (
-              <p style={{ color: '#f87171', fontSize: '14px', marginTop: '12px' }}>
-                ⚠️ QR inválido — usa el código del Servidor Radar
-              </p>
+              <div style={{ background: 'rgba(252,165,165,0.1)', padding: '10px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <ShieldAlert size={16} color="#fca5a5" />
+                <span style={{ color: '#fca5a5', fontSize: '13px' }}>QR inválido — usa el del Padre</span>
+              </div>
             )}
 
-            <button className="glass-btn secondary" style={{ marginTop: '16px', opacity: 0.75 }} onClick={handleBack}>
-              ← Volver
+            <button className="glass-btn secondary" style={{ opacity: 0.75, border: 'none', background: 'rgba(255,255,255,0.05)' }} onClick={handleBack}>
+              <ArrowLeft size={16} /> Volver
             </button>
           </div>
         )}
       </div>
-      <p style={{ fontSize: '11px', opacity: 0.35, marginTop: '16px', textAlign: 'center', letterSpacing: '0.3px' }}>
+      
+      <p style={{ fontSize: '11px', opacity: 0.4, marginTop: '20px', textAlign: 'center', letterSpacing: '0.5px' }}>
         Desarrollado por Adelio González
       </p>
     </div>
