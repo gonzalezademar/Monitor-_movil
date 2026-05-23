@@ -53,16 +53,32 @@ export default function ClientDashboard() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [textInput, setTextInput] = useState('');
   const [isRecording, setIsRecording] = useState(false);
+  const [isProcessingMic, setIsProcessingMic] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  const cancelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wakeLockRef = useRef<any>(null);
+
+  const acquireWakeLock = async () => {
+    try {
+      if ('wakeLock' in navigator && !wakeLockRef.current) {
+        wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+      }
+    } catch (e) { console.log('Wakelock failed', e); }
+  };
+  const releaseWakeLock = () => {
+    if (wakeLockRef.current) { wakeLockRef.current.release(); wakeLockRef.current = null; }
+  };
 
   useEffect(() => {
     return () => {
       if (sosTimerRef.current) clearTimeout(sosTimerRef.current);
       if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
+      if (cancelTimerRef.current) clearTimeout(cancelTimerRef.current);
       if (peerRef.current) peerRef.current.destroy();
       stopRemoteAlarm();
+      releaseWakeLock();
       if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
         mediaRecorderRef.current.stop();
       }
@@ -134,6 +150,9 @@ export default function ClientDashboard() {
         conn.on('open', () => {
           setIsConnected(true);
           
+          // Enviar perfil pesado SOLO una vez al conectar
+          conn.send({ type: 'USER_PROFILE', name: userName, avatar: avatarBase64 });
+          
           // Flush Offline Queue
           const currentQueue = useStore.getState().offlineQueue;
           if (currentQueue.length > 0) {
@@ -143,17 +162,28 @@ export default function ClientDashboard() {
 
           setInterval(() => {
             if (connRef.current && connRef.current.open) {
-              connRef.current.send({ type: 'HEARTBEAT', name: userName, avatar: avatarBase64 });
+              connRef.current.send({ type: 'HEARTBEAT', name: userName }); // Sin avatar, ultra ligero
             }
           }, 5000);
         });
 
         conn.on('data', (data: any) => {
-          if (data.type === 'REMOTE_SOS' && !useStore.getState().isSOSActive) playRemoteAlarm();
+          if (data.type === 'REMOTE_SOS') {
+             setGhostModeActive(false); // Anula sigilo visual si suena sirena
+             releaseWakeLock();
+             if (!useStore.getState().isSOSActive) playRemoteAlarm();
+          }
           if (data.type === 'STOP_REMOTE_SOS') stopRemoteAlarm();
           if (data.type === 'GHOST_MODE') {
              setGhostModeActive(true);
-             stopRemoteAlarm();
+             acquireWakeLock(); // Prohibe apagar pantalla
+             stopRemoteAlarm(); // Prioridad sigilo
+          }
+          if (data.type === 'SOS_ALERT') {
+             // Eco comunitario: suena sirena por otro miembro
+             if (!useStore.getState().isSOSActive) {
+                playRemoteAlarm();
+             }
           }
           if (data.type === 'MONITOR_LOCATION') {
              setMonitorLocation({ lat: data.lat, lng: data.lng, avatar: data.avatar });
@@ -210,8 +240,7 @@ export default function ClientDashboard() {
                          type: 'LOCATION',
                          lat: position.coords.latitude,
                          lng: position.coords.longitude,
-                         name: userName || 'Cliente',
-                         avatar: avatarBase64
+                         name: userName || 'Cliente' // Ligero
                      });
                  }
              }
@@ -233,13 +262,16 @@ export default function ClientDashboard() {
   useEffect(() => {
     if (isSOSActive) {
       stopRemoteAlarm(); // Prioridad sigilo
+      acquireWakeLock(); // No dormir en pánico
       if (connRef.current && connRef.current.open) {
         connRef.current.send({ type: 'SOS_ALERT', name: userName || 'Cliente' });
       } else {
         enqueueOfflineAction({ type: 'SOS_ALERT', name: userName || 'Cliente' });
       }
+    } else {
+      if (!ghostModeActive) releaseWakeLock();
     }
-  }, [isSOSActive, userName, enqueueOfflineAction]);
+  }, [isSOSActive, userName, ghostModeActive, enqueueOfflineAction]);
 
   const sendAction = (type: string) => {
     const action = { type, name: userName };
@@ -279,6 +311,8 @@ export default function ClientDashboard() {
   };
 
   const startRecording = async () => {
+    if (isRecording || isProcessingMic) return;
+    setIsProcessingMic(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaRecorderRef.current = new MediaRecorder(stream);
@@ -302,6 +336,7 @@ export default function ClientDashboard() {
             timestamp: Date.now()
           };
           dispatchChatMessage(msg);
+          setIsProcessingMic(false);
         };
         stream.getTracks().forEach(track => track.stop());
       };
@@ -310,6 +345,7 @@ export default function ClientDashboard() {
       setIsRecording(true);
     } catch (err) {
       console.error('Error al acceder al micrófono', err);
+      setIsProcessingMic(false);
     }
   };
 
@@ -317,6 +353,8 @@ export default function ClientDashboard() {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
+    } else {
+      setIsProcessingMic(false);
     }
   };
 
@@ -338,6 +376,18 @@ export default function ClientDashboard() {
     }
   };
 
+  const startCancelSOS = (e: any) => {
+    e.stopPropagation();
+    cancelTimerRef.current = setTimeout(() => {
+      cancelSOS();
+    }, 2000);
+  };
+
+  const stopCancelSOS = (e: any) => {
+    e.stopPropagation();
+    if (cancelTimerRef.current) clearTimeout(cancelTimerRef.current);
+  };
+
   const handleBlackoutTap = () => {
     tapCountRef.current += 1;
     if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
@@ -357,7 +407,13 @@ export default function ClientDashboard() {
   if (isSOSActive) {
     return (
       <div className="blackout-screen" onClick={handleBlackoutTap} style={{ userSelect: 'none', cursor: 'default', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', paddingBottom: '40px' }}>
-         <button onClick={(e) => { e.stopPropagation(); cancelSOS(); }} style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: 'rgba(255,255,255,0.5)', padding: '12px 24px', borderRadius: '24px', fontSize: '14px', zIndex: 10 }}>Mantener pulsado para cancelar SOS</button>
+         <button 
+           onMouseDown={startCancelSOS} onMouseUp={stopCancelSOS} onMouseLeave={stopCancelSOS} 
+           onTouchStart={startCancelSOS} onTouchEnd={stopCancelSOS} 
+           style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: 'rgba(255,255,255,0.5)', padding: '12px 24px', borderRadius: '24px', fontSize: '14px', zIndex: 10, touchAction: 'none' }}
+         >
+           Mantener pulsado para cancelar SOS
+         </button>
       </div>
     );
   }

@@ -113,17 +113,24 @@ export default function MonitorDashboard() {
       conn.on('data', (data: any) => {
         const now = Date.now();
         
+        if (data.type === 'USER_PROFILE') {
+          setClients(prev => ({
+            ...prev,
+            [conn.peer]: { ...(prev[conn.peer] || { lat: 0, lng: 0, lastSeen: now }), name: data.name, isOnline: true, avatar: data.avatar || null }
+          }));
+        }
+
         if (data.type === 'HEARTBEAT') {
           setClients(prev => ({
             ...prev,
-            [conn.peer]: { ...(prev[conn.peer] || { lat: 0, lng: 0 }), name: data.name, lastSeen: now, isOnline: true, avatar: data.avatar || null }
+            [conn.peer]: { ...(prev[conn.peer] || { lat: 0, lng: 0, avatar: null }), name: data.name, lastSeen: now, isOnline: true }
           }));
         }
         
         if (data.type === 'LOCATION') {
           setClients((prev) => {
             if (Object.keys(prev).length === 0) setMapCenterTarget([data.lat, data.lng]);
-            return { ...prev, [conn.peer]: { lat: data.lat, lng: data.lng, name: data.name, lastSeen: now, isOnline: true, avatar: data.avatar || null } };
+            return { ...prev, [conn.peer]: { ...(prev[conn.peer] || { avatar: null }), lat: data.lat, lng: data.lng, name: data.name, lastSeen: now, isOnline: true } };
           });
 
           if (myLocation) {
