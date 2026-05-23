@@ -6,7 +6,7 @@ import Peer from 'peerjs';
 import { Geolocation } from '@capacitor/geolocation';
 import { MapContainer, TileLayer, Marker, useMap, Popup } from 'react-leaflet';
 import L from 'leaflet';
-import { ShieldAlert, Bell, MessageSquare, LogOut, CheckCircle, Mic, Send, X, Clock, Camera, Menu, Focus, Trash, Smartphone } from 'lucide-react';
+import { ShieldAlert, Bell, MessageSquare, LogOut, CheckCircle, Mic, Send, X, Clock, Camera, Menu, Focus, Trash, Smartphone, Sun, Moon } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
@@ -46,6 +46,7 @@ export default function ClientDashboard() {
   const [ghostModeActive, setGhostModeActive] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [mapCenterTarget, setMapCenterTarget] = useState<[number, number] | null>(null);
+  const [mapTheme, setMapTheme] = useState<'dark' | 'light'>('dark');
 
   const audioCtxRef = useRef<AudioContext | null>(null);
   const oscillatorRef = useRef<OscillatorNode | null>(null);
@@ -368,13 +369,13 @@ export default function ClientDashboard() {
   };
 
   const toggleRecording = async () => {
-    if (isProcessingMic) return;
-
     if (isRecording) {
       if (mediaRecorderRef.current) mediaRecorderRef.current.stop();
       setIsRecording(false);
       return;
     }
+
+    if (isProcessingMic) return;
 
     setIsProcessingMic(true);
     discardRecordingRef.current = false;
@@ -553,7 +554,7 @@ export default function ClientDashboard() {
 
       <MapContainer center={myLocation || [-34.6037, -58.3816]} zoom={15} style={{ height: '100dvh', width: '100vw' }} zoomControl={false}>
         <MapAutoCenter target={mapCenterTarget} />
-        <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
+        <TileLayer url={mapTheme === 'dark' ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"} />
         
         {myLocation && (
           <Marker position={myLocation} icon={myIconRef.current}>
@@ -580,6 +581,14 @@ export default function ClientDashboard() {
           </Marker>
         )}
       </MapContainer>
+
+      <button 
+        className="map-theme-btn" 
+        onClick={() => setMapTheme(prev => prev === 'dark' ? 'light' : 'dark')}
+        title="Cambiar tema de mapa"
+      >
+        {mapTheme === 'dark' ? <Sun size={24} /> : <Moon size={24} />}
+      </button>
 
       {/* Alerta de Alarma Remota del Padre */}
       {isRemoteAlarmActive && (
@@ -608,21 +617,26 @@ export default function ClientDashboard() {
 
       {/* Bottom Bar Overlay */}
       <div className="bottom-bar">
-        <button className="bottom-action" onClick={() => myLocation && setMapCenterTarget(myLocation)}><Focus size={22} /><span>Centrar</span></button>
+        <button className="bottom-action" onClick={() => myLocation && setMapCenterTarget(myLocation)}><Focus size={30} /><span>Centrar</span></button>
         
         {/* Llegué Bien Action */}
         <button className="bottom-action" onClick={() => sendAction('CHECK_IN')}>
-          <CheckCircle size={22} color="#4ade80" />
+          <CheckCircle size={30} color="#4ade80" />
           <span style={{ color: '#4ade80' }}>Llegué Bien</span>
         </button>
 
         {/* SOS Button inside bottom-bar */}
-        <button className="bottom-action danger" 
+        <button 
+          className="bottom-action" 
           onMouseDown={handleSOSPressStart} onMouseUp={handleSOSPressEnd} onMouseLeave={handleSOSPressEnd}
           onTouchStart={handleSOSPressStart} onTouchEnd={handleSOSPressEnd} onTouchMove={handleSOSPressEnd} onTouchCancel={handleSOSPressEnd}
+          style={{
+            color: isSOSActive ? '#4ade80' : 'rgba(251, 113, 133, 0.5)',
+            animation: isSOSActive ? 'pulse-green 1s infinite' : 'none'
+          }}
         >
-          <ShieldAlert size={22} color="#fb7185" />
-          <span style={{ color: '#fb7185' }}>S.O.S (Mantener)</span>
+          <ShieldAlert size={30} color={isSOSActive ? '#4ade80' : 'rgba(251, 113, 133, 0.5)'} />
+          <span>{isSOSActive ? '🚨 SOS: TRANSMITIENDO' : '🛡️ SOS: DESACTIVADO'}</span>
         </button>
       </div>
 

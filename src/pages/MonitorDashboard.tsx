@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useStore, type ChatMessage } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { QRCode } from 'react-qr-code';
-import { Menu, X, QrCode, LogOut, Focus, AlertCircle, ShieldAlert, Smartphone, BellOff, MessageSquare, Send, Mic, MapPin, Ghost, Bell, Camera, Trash } from 'lucide-react';
+import { Menu, X, QrCode, LogOut, Focus, AlertCircle, ShieldAlert, Smartphone, BellOff, MessageSquare, Send, Mic, MapPin, Ghost, Bell, Camera, Trash, Sun, Moon } from 'lucide-react';
 import Peer from 'peerjs';
 import { Geolocation } from '@capacitor/geolocation';
 
@@ -55,6 +55,8 @@ export default function MonitorDashboard() {
   const [alarmActive, setAlarmActive] = useState<{ active: boolean; originName: string }>({ active: false, originName: '' });
   const [mapCenterTarget, setMapCenterTarget] = useState<[number, number] | null>(null);
   const [gpsError, setGpsError] = useState<string | null>(null);
+  const [mapTheme, setMapTheme] = useState<'dark' | 'light'>('dark');
+  const [activeRemoteAlarms, setActiveRemoteAlarms] = useState<Record<string, boolean>>({});
   
   // Caché de íconos para evitar parpadeos masivos del mapa
   const markerIconCache = useRef<Record<string, L.DivIcon>>({});
@@ -313,7 +315,19 @@ export default function MonitorDashboard() {
       (peer.connections as any)[peerId].forEach((conn: any) => {
         if (conn.open) conn.send({ type: 'REMOTE_SOS' });
       });
+      setActiveRemoteAlarms(prev => ({ ...prev, [peerId]: true }));
       showToast('🚨 Sirena Remota disparada.');
+    }
+  };
+
+  const stopLoudAlarm = (peerId: string) => {
+    const peer = peerRef.current;
+    if (peer && (peer.connections as any)[peerId]) {
+      (peer.connections as any)[peerId].forEach((conn: any) => {
+        if (conn.open) conn.send({ type: 'STOP_REMOTE_SOS' });
+      });
+      setActiveRemoteAlarms(prev => ({ ...prev, [peerId]: false }));
+      showToast('✅ Sirena Remota apagada.');
     }
   };
 
@@ -329,13 +343,13 @@ export default function MonitorDashboard() {
   };
 
   const toggleRecording = async () => {
-    if (isProcessingMic) return;
-
     if (isRecording) {
       if (mediaRecorderRef.current) mediaRecorderRef.current.stop();
       setIsRecording(false);
       return;
     }
+
+    if (isProcessingMic) return;
 
     setIsProcessingMic(true);
     discardRecordingRef.current = false;
@@ -454,7 +468,7 @@ export default function MonitorDashboard() {
       )}
       <MapContainer center={myLocation || [-34.6037, -58.3816]} zoom={13} style={{ height: '100dvh', width: '100vw' }} zoomControl={false}>
         <MapAutoCenter target={mapCenterTarget} />
-        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+        <TileLayer url={mapTheme === 'dark' ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"} />
         {myLocation && (
           <>
             <Marker position={myLocation} icon={getAvatarIcon('monitor', avatarBase64, true, true)}>
@@ -472,6 +486,14 @@ export default function MonitorDashboard() {
           );
         })}
       </MapContainer>
+
+      <button 
+        className="map-theme-btn" 
+        onClick={() => setMapTheme(prev => prev === 'dark' ? 'light' : 'dark')}
+        title="Cambiar tema de mapa"
+      >
+        {mapTheme === 'dark' ? <Sun size={24} /> : <Moon size={24} />}
+      </button>
 
       {/* TOASTS */}
       <div style={{ position: 'absolute', top: 80, left: 20, right: 20, zIndex: 1100, display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -500,10 +522,17 @@ export default function MonitorDashboard() {
       </div>
 
       <div className="bottom-bar">
-        <button className="bottom-action" onClick={handleCenterMap}><Focus size={22} /><span>Centrar</span></button>
-        <button className={`bottom-action ${remoteSOSActive ? 'danger-active' : 'danger'}`} onClick={toggleGhostMode} style={{ background: remoteSOSActive ? '#8b5cf6' : 'rgba(0,0,0,0.6)' }}>
-          <Ghost size={22} color={remoteSOSActive ? '#fff' : '#c084fc'} />
-          <span style={{ color: remoteSOSActive ? '#fff' : '#c084fc' }}>{remoteSOSActive ? 'Apagar Sigilo' : 'Modo Sigilo'}</span>
+        <button className="bottom-action" onClick={handleCenterMap}><Focus size={30} /><span>Centrar</span></button>
+        <button 
+          className="bottom-action" 
+          onClick={toggleGhostMode} 
+          style={{ 
+            color: remoteSOSActive ? '#4ade80' : 'rgba(251, 113, 133, 0.5)',
+            animation: remoteSOSActive ? 'pulse-green 1s infinite' : 'none'
+          }}
+        >
+          <Ghost size={30} color={remoteSOSActive ? '#4ade80' : 'rgba(251, 113, 133, 0.5)'} />
+          <span>{remoteSOSActive ? '👻 Sigilo: TRANSMITIENDO' : '👻 Sigilo: APAGADO'}</span>
         </button>
       </div>
 
@@ -533,9 +562,15 @@ export default function MonitorDashboard() {
                 {!c.isOnline && <span style={{ fontSize: '11px', opacity: 0.5 }}>Offline</span>}
                 {c.isOnline && (
                   <>
-                    <button onClick={() => triggerLoudAlarm(id)} style={{ background: 'none', border: 'none', color: '#dc2626', padding: '4px', display: 'flex', alignItems: 'center', cursor: 'pointer' }} title="Hacer Sonar Alarma">
-                      <Bell size={18} />
-                    </button>
+                    {activeRemoteAlarms[id] ? (
+                      <button onClick={() => stopLoudAlarm(id)} style={{ background: 'rgba(74,222,128,0.2)', border: 'none', color: '#4ade80', padding: '6px', borderRadius: '50%', display: 'flex', alignItems: 'center', cursor: 'pointer', animation: 'pulse-green 1s infinite' }} title="Apagar Alarma Remota">
+                        <BellOff size={18} />
+                      </button>
+                    ) : (
+                      <button onClick={() => triggerLoudAlarm(id)} style={{ background: 'none', border: 'none', color: '#dc2626', padding: '4px', display: 'flex', alignItems: 'center', cursor: 'pointer' }} title="Hacer Sonar Alarma">
+                        <Bell size={18} />
+                      </button>
+                    )}
                     <button onClick={() => requestSilentLocation(id)} style={{ background: 'none', border: 'none', color: '#ec4899', padding: '4px', display: 'flex', alignItems: 'center', cursor: 'pointer' }} title="Actualizar GPS en sigilo">
                       <MapPin size={18} />
                     </button>
