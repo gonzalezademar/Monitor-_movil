@@ -184,7 +184,12 @@ export default function ClientDashboard() {
           // Flush Offline Queue con Deduplicación (Aduana Anti-Spam)
           const currentQueue = useStore.getState().offlineQueue;
           if (currentQueue.length > 0) {
-             const uniqueQueue = currentQueue.filter((v, i, a) => a.findIndex(t => (t.type === v.type && t.type === 'CHECK_IN')) === i);
+             const uniqueQueue = currentQueue.filter((v, i, a) => {
+                if (v.type === 'CHECK_IN') {
+                   return a.findIndex(t => t.type === 'CHECK_IN') === i;
+                }
+                return true;
+             });
              uniqueQueue.forEach(action => conn.send(action));
              useStore.getState().clearOfflineQueue();
           }
