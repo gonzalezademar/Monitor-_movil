@@ -58,6 +58,8 @@ export default function ClientDashboard() {
   const [textInput, setTextInput] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessingMic, setIsProcessingMic] = useState(false);
+  const [isUnlinkModalOpen, setIsUnlinkModalOpen] = useState(false);
+  const [unlinkConfirmName, setUnlinkConfirmName] = useState('');
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const chatScrollRef = useRef<HTMLDivElement>(null);
@@ -533,8 +535,16 @@ export default function ClientDashboard() {
   };
 
   const handleLogout = () => {
-    logout();
-    navigate('/');
+    setIsUnlinkModalOpen(true);
+    setUnlinkConfirmName('');
+  };
+
+  const confirmLogout = () => {
+    if (unlinkConfirmName.trim() === userName.trim()) {
+      setIsUnlinkModalOpen(false);
+      logout();
+      navigate('/');
+    }
   };
 
   if (isSOSActive) {
@@ -771,6 +781,56 @@ export default function ClientDashboard() {
           )}
         </div>
       </div>
+
+      {/* Modal de Desvinculación de Emergencia con Doble Confirmación */}
+      {isUnlinkModalOpen && (
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+          <div style={{ background: 'rgba(30, 41, 59, 0.8)', border: '1px solid rgba(255, 255, 255, 0.1)', padding: '24px', borderRadius: '24px', width: '100%', maxWidth: '400px', display: 'flex', flexDirection: 'column', gap: '16px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)' }}>
+            <h3 style={{ margin: 0, fontSize: '18px', color: '#f87171', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <ShieldAlert size={24} /> Desvincular Dispositivo
+            </h3>
+            <p style={{ fontSize: '14px', margin: 0, opacity: 0.8, lineHeight: 1.5 }}>
+              ⚠️ Esta acción cortará el enlace de seguridad P2P permanente 24/7 con su familiar.
+            </p>
+            <p style={{ fontSize: '14px', margin: 0, opacity: 0.9 }}>
+              Escriba su nombre de usuario registrado <strong>({userName})</strong> para confirmar:
+            </p>
+            <input 
+              type="text" 
+              value={unlinkConfirmName} 
+              onChange={(e) => setUnlinkConfirmName(e.target.value)} 
+              placeholder="Escriba su nombre aquí" 
+              style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', padding: '12px 16px', borderRadius: '12px', color: 'white', outline: 'none', fontSize: '14px' }} 
+            />
+            <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
+              <button 
+                onClick={() => setIsUnlinkModalOpen(false)} 
+                style={{ flex: 1, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '12px', borderRadius: '12px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={confirmLogout} 
+                disabled={unlinkConfirmName.trim() !== userName.trim()} 
+                style={{ 
+                  flex: 1, 
+                  background: unlinkConfirmName.trim() === userName.trim() ? '#ef4444' : 'rgba(239, 68, 68, 0.2)', 
+                  border: 'none', 
+                  color: unlinkConfirmName.trim() === userName.trim() ? 'white' : 'rgba(255,255,255,0.3)', 
+                  padding: '12px', 
+                  borderRadius: '12px', 
+                  fontSize: '14px', 
+                  fontWeight: 'bold', 
+                  cursor: unlinkConfirmName.trim() === userName.trim() ? 'pointer' : 'not-allowed',
+                  transition: 'background 0.3s'
+                }}
+              >
+                Desvincular
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
