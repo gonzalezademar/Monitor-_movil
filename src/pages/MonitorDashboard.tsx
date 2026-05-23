@@ -228,8 +228,11 @@ export default function MonitorDashboard() {
   }, []);
 
   const playSiren = () => {
-    if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const ctx = audioCtxRef.current;
+    if (!(window as any).globalAudioCtx) {
+      (window as any).globalAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    audioCtxRef.current = (window as any).globalAudioCtx;
+    const ctx = audioCtxRef.current!;
     if (ctx.state === 'suspended') ctx.resume();
 
     const osc = ctx.createOscillator();

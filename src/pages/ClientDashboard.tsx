@@ -104,10 +104,11 @@ export default function ClientDashboard() {
   }, [messages, isChatOpen]);
 
   const playRemoteAlarm = () => {
-    if (!audioCtxRef.current) {
-      audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    if (!(window as any).globalAudioCtx) {
+      (window as any).globalAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
     }
-    const ctx = audioCtxRef.current;
+    audioCtxRef.current = (window as any).globalAudioCtx;
+    const ctx = audioCtxRef.current!;
     if (ctx.state === 'suspended') ctx.resume();
 
     const osc = ctx.createOscillator();
@@ -410,6 +411,7 @@ export default function ClientDashboard() {
 
   const cancelSOS = () => {
     setSOSActive(false);
+    stopRemoteAlarm(); // Apagado forzoso de cualquier alarma que esté sonando de fondo
     if (connRef.current && connRef.current.open) {
       connRef.current.send({ type: 'SOS_CANCELED', name: userName });
     }

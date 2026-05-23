@@ -43,9 +43,12 @@ export default function Onboarding() {
     }
     setNameError('');
     
-    // Hack para saltar el "Autoplay Policy" de navegadores modernos
+    // Hack para saltar el "Autoplay Policy" de navegadores modernos y Apple iOS
     try {
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      if (!(window as any).globalAudioCtx) {
+        (window as any).globalAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      const ctx = (window as any).globalAudioCtx;
       const buffer = ctx.createBuffer(1, 1, 22050);
       const source = ctx.createBufferSource();
       source.buffer = buffer;
