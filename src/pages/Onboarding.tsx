@@ -15,6 +15,7 @@ export default function Onboarding() {
   const [step, setStep] = useState(1);
   const [tempRole, setTempRole] = useState<'monitor' | 'client' | null>(null);
   const [scanError, setScanError] = useState(false);
+  const [avatarInput, setAvatarInput] = useState<string | null>(null);
 
   // ESTABILIDAD: refs para cleanup de timers — evita fugas y estado huérfano al desmontar
   const scanErrorTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -66,6 +67,7 @@ export default function Onboarding() {
 
   const finalizeMonitor = () => {
     setUserName(nameInput);
+    if (avatarInput) useStore.getState().setAvatar(avatarInput);
     setMasterServerId(serverCode);
     setRole('monitor');
   };
@@ -78,6 +80,7 @@ export default function Onboarding() {
         if (scanErrorTimerRef.current) clearTimeout(scanErrorTimerRef.current);
         setMasterServerId(text);
         setUserName(nameInput);
+        if (avatarInput) useStore.getState().setAvatar(avatarInput);
         setRole('client');
       } else {
         setScanError(true);
@@ -102,6 +105,34 @@ export default function Onboarding() {
     setCameraError('');
   };
 
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_SIZE = 128;
+          let width = img.width;
+          let height = img.height;
+          if (width > height) {
+            if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; }
+          } else {
+            if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; }
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          setAvatarInput(canvas.toDataURL('image/jpeg', 0.6));
+        };
+        img.src = ev.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   return (
     <div className="onboarding-container">
       <div className="glass-panel">
@@ -122,7 +153,7 @@ export default function Onboarding() {
         {step === 1 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <div>
-              <div style={{ position: 'relative' }}>
+              <div style={{ position: 'relative', marginBottom: '12px' }}>
                 <User size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
                 <input
                   type="text"
@@ -134,6 +165,24 @@ export default function Onboarding() {
                   style={{ paddingLeft: '44px', margin: 0 }}
                 />
               </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'rgba(255,255,255,0.05)', padding: '12px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                {avatarInput ? (
+                  <img src={avatarInput} alt="Avatar" style={{ width: '48px', height: '48px', borderRadius: '50%', objectFit: 'cover', border: '2px solid #ec4899' }} />
+                ) : (
+                  <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Camera size={20} opacity={0.5} />
+                  </div>
+                )}
+                <div style={{ flex: 1 }}>
+                  <label htmlFor="avatar-upload" style={{ background: 'transparent', color: '#ec4899', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', display: 'block' }}>
+                    {avatarInput ? 'Cambiar Foto' : 'Añadir Foto (Opcional)'}
+                  </label>
+                  <input id="avatar-upload" type="file" accept="image/*" capture="user" onChange={handleAvatarChange} style={{ display: 'none' }} />
+                  <p style={{ fontSize: '10px', opacity: 0.6, margin: '2px 0 0' }}>Para reconocerte en el mapa</p>
+                </div>
+              </div>
+
               {nameError && (
                 <p style={{ color: '#fca5a5', fontSize: '12px', marginTop: '6px', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '4px' }}>
                   <ShieldAlert size={14} /> {nameError}

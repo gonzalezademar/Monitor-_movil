@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useStore, type ChatMessage } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { QRCode } from 'react-qr-code';
-import { Menu, X, QrCode, LogOut, Focus, AlertCircle, ShieldAlert, Smartphone, BellOff, MessageSquare, Send, Mic, MapPin } from 'lucide-react';
+import { Menu, X, QrCode, LogOut, Focus, AlertCircle, ShieldAlert, Smartphone, BellOff, MessageSquare, Send, Mic, MapPin, Ghost, Bell } from 'lucide-react';
 import Peer from 'peerjs';
 import { Geolocation } from '@capacitor/geolocation';
 
@@ -46,12 +46,12 @@ export default function MonitorDashboard() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   
-  const { logout, masterServerId, fenceRadius, setFenceRadius, userName, messages, addMessage } = useStore();
+  const { logout, masterServerId, fenceRadius, setFenceRadius, userName, avatarBase64, messages, addMessage, cleanOldMessages } = useStore();
   const navigate = useNavigate();
   const [localRadius, setLocalRadius] = useState(fenceRadius);
   const [myLocation, setMyLocation] = useState<[number, number] | null>(null);
 
-  const [clients, setClients] = useState<Record<string, { lat: number; lng: number; name: string, lastSeen: number, isOnline: boolean }>>({});
+  const [clients, setClients] = useState<Record<string, { lat: number; lng: number; name: string, lastSeen: number, isOnline: boolean, avatar: string | null }>>({});
   const [alarmActive, setAlarmActive] = useState<{ active: boolean; originName: string }>({ active: false, originName: '' });
   const [mapCenterTarget, setMapCenterTarget] = useState<[number, number] | null>(null);
   
@@ -82,12 +82,16 @@ export default function MonitorDashboard() {
     Geolocation.requestPermissions().then(perm => {
       if (perm.location === 'granted') {
         Geolocation.watchPosition({ enableHighAccuracy: true }, (pos) => {
-           if (pos) setMyLocation([pos.coords.latitude, pos.coords.longitude]);
+           if (pos) {
+             setMyLocation([pos.coords.latitude, pos.coords.longitude]);
+             broadcastAction({ type: 'MONITOR_LOCATION', lat: pos.coords.latitude, lng: pos.coords.longitude, avatar: avatarBase64 });
+           }
         }).then(id => watchId = id);
       }
     });
+    cleanOldMessages();
     return () => { if (watchId) Geolocation.clearWatch({ id: watchId }); }
-  }, []);
+  }, [avatarBase64, cleanOldMessages]);
 
   // P2P Setup
   useEffect(() => {
@@ -112,14 +116,14 @@ export default function MonitorDashboard() {
         if (data.type === 'HEARTBEAT') {
           setClients(prev => ({
             ...prev,
-            [conn.peer]: { ...(prev[conn.peer] || { lat: 0, lng: 0 }), name: data.name, lastSeen: now, isOnline: true }
+            [conn.peer]: { ...(prev[conn.peer] || { lat: 0, lng: 0 }), name: data.name, lastSeen: now, isOnline: true, avatar: data.avatar || null }
           }));
         }
         
         if (data.type === 'LOCATION') {
           setClients((prev) => {
             if (Object.keys(prev).length === 0) setMapCenterTarget([data.lat, data.lng]);
-            return { ...prev, [conn.peer]: { lat: data.lat, lng: data.lng, name: data.name, lastSeen: now, isOnline: true } };
+            return { ...prev, [conn.peer]: { lat: data.lat, lng: data.lng, name: data.name, lastSeen: now, isOnline: true, avatar: data.avatar || null } };
           });
 
           if (myLocation) {
@@ -145,6 +149,13 @@ export default function MonitorDashboard() {
         if (data.type === 'SOS_ALERT') {
           setAlarmActive({ active: true, originName: data.name });
           playSiren();
+          // Malla P2P: Rebotar el SOS a los demás familiares
+          broadcastAction({ type: 'SOS_ALERT', name: data.name });
+        }
+
+        if (data.type === 'SOS_CANCELED') {
+          stopSiren();
+          showToast(`⚠️ ${data.name} canceló el SOS. Recomendamos rastreo en sigilo.`);
         }
 
         if (data.type === 'CHECK_IN') showToast(`✅ ${data.name} reporta que llegó bien.`);
@@ -238,12 +249,22 @@ export default function MonitorDashboard() {
     }
   };
 
-  const toggleRemoteSOS = () => {
+  const toggleGhostMode = () => {
     const newState = !remoteSOSActive;
-    broadcastAction({ type: newState ? 'REMOTE_SOS' : 'STOP_REMOTE_SOS' });
+    broadcastAction({ type: newState ? 'GHOST_MODE' : 'STOP_REMOTE_SOS' });
     setRemoteSOSActive(newState);
-    if (newState) showToast("🚨 Alarma remota activada en dispositivos hijos");
-    else showToast("✅ Alarma remota apagada");
+    if (newState) showToast("👻 Modo Sigilo activado en dispositivos hijos");
+    else showToast("✅ Modo Sigilo apagado");
+  };
+
+  const triggerLoudAlarm = (peerId: string) => {
+    const peer = peerRef.current;
+    if (peer && (peer.connections as any)[peerId]) {
+      (peer.connections as any)[peerId].forEach((conn: any) => {
+        if (conn.open) conn.send({ type: 'REMOTE_SOS' });
+      });
+      showToast('🚨 Sirena Remota disparada.');
+    }
   };
 
   const dispatchChatMessage = (msg: ChatMessage) => {
@@ -316,14 +337,16 @@ export default function MonitorDashboard() {
         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
         {myLocation && (
           <>
-            <Marker position={myLocation}><Popup>Tú (Monitor)</Popup></Marker>
+            <Marker position={myLocation} icon={L.divIcon({ className: 'custom-avatar-marker', html: avatarBase64 ? `<div style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid #8b5cf6;box-shadow:0 0 10px rgba(139,92,246,0.5);"><img src="${avatarBase64}" style="width:100%;height:100%;object-fit:cover;" /></div>` : `<div style="width:24px;height:24px;background:#8b5cf6;border-radius:50%;border:2px solid white;"></div>`, iconSize: [36, 36], iconAnchor: [18, 18] })}>
+              <Popup>Tú (Monitor)</Popup>
+            </Marker>
             <Circle center={myLocation} radius={localRadius} pathOptions={{ color: '#4f46e5', fillOpacity: 0.1, weight: 2, dashArray: "5, 5" }} />
           </>
         )}
         {Object.entries(clients).map(([id, client]) => {
           if (client.lat === 0 && client.lng === 0) return null;
           return (
-            <Marker key={id} position={[client.lat, client.lng]} opacity={client.isOnline ? 1 : 0.5}>
+            <Marker key={id} position={[client.lat, client.lng]} opacity={client.isOnline ? 1 : 0.5} icon={L.divIcon({ className: 'custom-avatar-marker', html: client.avatar ? `<div style="width:40px;height:40px;border-radius:50%;overflow:hidden;border:3px solid ${client.isOnline ? '#4ade80' : '#9ca3af'};box-shadow:0 0 10px rgba(74,222,128,0.5);"><img src="${client.avatar}" style="width:100%;height:100%;object-fit:cover;" /></div>` : `<div style="width:24px;height:24px;background:${client.isOnline ? '#4ade80' : '#9ca3af'};border-radius:50%;border:2px solid white;"></div>`, iconSize: [40, 40], iconAnchor: [20, 20] })}>
               <Popup><strong>{client.name}</strong> <br/>{client.isOnline ? 'GPS en tiempo real' : 'Última ubicación conocida'}</Popup>
             </Marker>
           );
@@ -358,9 +381,9 @@ export default function MonitorDashboard() {
 
       <div className="bottom-bar">
         <button className="bottom-action" onClick={handleCenterMap}><Focus size={22} /><span>Centrar</span></button>
-        <button className={`bottom-action ${remoteSOSActive ? 'danger-active' : 'danger'}`} onClick={toggleRemoteSOS}>
-          <AlertCircle size={22} color={remoteSOSActive ? '#fff' : '#dc2626'} />
-          <span style={{ color: remoteSOSActive ? '#fff' : 'inherit' }}>{remoteSOSActive ? 'Apagar Remoto' : 'SOS Remoto'}</span>
+        <button className={`bottom-action ${remoteSOSActive ? 'danger-active' : 'danger'}`} onClick={toggleGhostMode} style={{ background: remoteSOSActive ? '#8b5cf6' : 'rgba(0,0,0,0.6)' }}>
+          <Ghost size={22} color={remoteSOSActive ? '#fff' : '#c084fc'} />
+          <span style={{ color: remoteSOSActive ? '#fff' : '#c084fc' }}>{remoteSOSActive ? 'Apagar Sigilo' : 'Modo Sigilo'}</span>
         </button>
       </div>
 
@@ -381,13 +404,22 @@ export default function MonitorDashboard() {
           ) : (
             Object.entries(clients).map(([id, c]) => (
               <div key={id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', background: c.isOnline ? 'rgba(79, 70, 229, 0.2)' : 'rgba(156, 163, 175, 0.2)', borderRadius: '12px', marginBottom: '8px' }}>
-                <div style={{ width: 10, height: 10, borderRadius: '50%', background: c.isOnline ? '#4ade80' : '#9ca3af' }}></div>
+                {c.avatar ? (
+                  <img src={c.avatar} alt={c.name} style={{ width: '32px', height: '32px', borderRadius: '50%', border: `2px solid ${c.isOnline ? '#4ade80' : '#9ca3af'}` }} />
+                ) : (
+                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: c.isOnline ? '#4ade80' : '#9ca3af' }}></div>
+                )}
                 <span style={{ fontSize: '15px', fontWeight: 'bold', color: c.isOnline ? 'inherit' : '#9ca3af', flex: 1 }}>{c.name}</span>
                 {!c.isOnline && <span style={{ fontSize: '11px', opacity: 0.5 }}>Offline</span>}
                 {c.isOnline && (
-                  <button onClick={() => requestSilentLocation(id)} style={{ background: 'none', border: 'none', color: '#ec4899', padding: '4px', display: 'flex', alignItems: 'center', cursor: 'pointer' }} title="Actualizar GPS en sigilo">
-                    <MapPin size={18} />
-                  </button>
+                  <>
+                    <button onClick={() => triggerLoudAlarm(id)} style={{ background: 'none', border: 'none', color: '#dc2626', padding: '4px', display: 'flex', alignItems: 'center', cursor: 'pointer' }} title="Hacer Sonar Alarma">
+                      <Bell size={18} />
+                    </button>
+                    <button onClick={() => requestSilentLocation(id)} style={{ background: 'none', border: 'none', color: '#ec4899', padding: '4px', display: 'flex', alignItems: 'center', cursor: 'pointer' }} title="Actualizar GPS en sigilo">
+                      <MapPin size={18} />
+                    </button>
+                  </>
                 )}
               </div>
             ))

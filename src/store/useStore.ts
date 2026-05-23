@@ -16,6 +16,8 @@ interface AppState {
   myPeerId: string | null;
   setRole: (role: 'monitor' | 'client') => void;
   setUserName: (name: string) => void;
+  avatarBase64: string | null;
+  setAvatar: (base64: string) => void;
   setMasterServerId: (id: string) => void;
   setMyPeerId: (id: string) => void;
   isSOSActive: boolean;
@@ -27,6 +29,7 @@ interface AppState {
   messages: ChatMessage[];
   offlineQueue: any[]; // Stores raw P2P objects to be sent later
   addMessage: (msg: ChatMessage) => void;
+  cleanOldMessages: () => void;
   enqueueOfflineAction: (action: any) => void;
   clearOfflineQueue: () => void;
   
@@ -38,10 +41,12 @@ export const useStore = create<AppState>()(
     (set) => ({
       role: null,
       userName: '',
+      avatarBase64: null,
       masterServerId: null,
       myPeerId: null,
       setRole: (role) => set({ role }),
       setUserName: (name) => set({ userName: name }),
+      setAvatar: (base64) => set({ avatarBase64: base64 }),
       setMasterServerId: (id) => set({ masterServerId: id }),
       setMyPeerId: (id) => set({ myPeerId: id }),
       isSOSActive: false,
@@ -52,10 +57,13 @@ export const useStore = create<AppState>()(
       messages: [],
       offlineQueue: [],
       addMessage: (msg) => set((state) => ({ messages: [...state.messages, msg].slice(-50) })), // Keep last 50
+      cleanOldMessages: () => set((state) => ({ 
+        messages: state.messages.filter(m => Date.now() - m.timestamp < 24 * 60 * 60 * 1000) 
+      })),
       enqueueOfflineAction: (action) => set((state) => ({ offlineQueue: [...state.offlineQueue, action] })),
       clearOfflineQueue: () => set({ offlineQueue: [] }),
 
-      logout: () => set({ role: null, userName: '', masterServerId: null, myPeerId: null, isSOSActive: false, fenceRadius: 100, messages: [], offlineQueue: [] })
+      logout: () => set({ role: null, userName: '', avatarBase64: null, masterServerId: null, myPeerId: null, isSOSActive: false, fenceRadius: 100, messages: [], offlineQueue: [] })
     }),
     {
       name: 'radar-storage',

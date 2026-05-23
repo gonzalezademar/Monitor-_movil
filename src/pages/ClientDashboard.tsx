@@ -30,7 +30,7 @@ function MapAutoCenter({ target }: { target: [number, number] | null }) {
 }
 
 export default function ClientDashboard() {
-  const { isSOSActive, setSOSActive, logout, userName, masterServerId, setMyPeerId, messages, addMessage, offlineQueue, enqueueOfflineAction } = useStore();
+  const { isSOSActive, setSOSActive, logout, userName, avatarBase64, masterServerId, setMyPeerId, messages, addMessage, offlineQueue, enqueueOfflineAction, cleanOldMessages } = useStore();
   const navigate = useNavigate();
 
   const sosTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -41,6 +41,8 @@ export default function ClientDashboard() {
   const connRef = useRef<any>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [myLocation, setMyLocation] = useState<[number, number] | null>(null);
+  const [monitorLocation, setMonitorLocation] = useState<{lat: number, lng: number, avatar: string | null} | null>(null);
+  const [ghostModeActive, setGhostModeActive] = useState(false);
 
   const audioCtxRef = useRef<AudioContext | null>(null);
   const oscillatorRef = useRef<OscillatorNode | null>(null);
@@ -141,7 +143,7 @@ export default function ClientDashboard() {
 
           setInterval(() => {
             if (connRef.current && connRef.current.open) {
-              connRef.current.send({ type: 'HEARTBEAT', name: userName });
+              connRef.current.send({ type: 'HEARTBEAT', name: userName, avatar: avatarBase64 });
             }
           }, 5000);
         });
@@ -149,10 +151,17 @@ export default function ClientDashboard() {
         conn.on('data', (data: any) => {
           if (data.type === 'REMOTE_SOS' && !useStore.getState().isSOSActive) playRemoteAlarm();
           if (data.type === 'STOP_REMOTE_SOS') stopRemoteAlarm();
+          if (data.type === 'GHOST_MODE') {
+             setGhostModeActive(true);
+             stopRemoteAlarm();
+          }
+          if (data.type === 'MONITOR_LOCATION') {
+             setMonitorLocation({ lat: data.lat, lng: data.lng, avatar: data.avatar });
+          }
           if (data.type === 'CHAT_MSG') {
              addMessage(data.message);
           }
-          if (data.type === 'SILENT_PING') {
+          if (data.type === 'SILENT_PING' || data.type === 'GHOST_MODE') {
              // Force update location without alerting user
              Geolocation.getCurrentPosition({ enableHighAccuracy: true }).then(pos => {
                if (connRef.current && connRef.current.open) {
@@ -201,7 +210,8 @@ export default function ClientDashboard() {
                          type: 'LOCATION',
                          lat: position.coords.latitude,
                          lng: position.coords.longitude,
-                         name: userName || 'Cliente'
+                         name: userName || 'Cliente',
+                         avatar: avatarBase64
                      });
                  }
              }
@@ -217,7 +227,7 @@ export default function ClientDashboard() {
     return () => {
       if (watchId) Geolocation.clearWatch({ id: watchId });
     };
-  }, [userName]);
+  }, [userName, avatarBase64]);
 
   // SOS status
   useEffect(() => {
@@ -321,12 +331,19 @@ export default function ClientDashboard() {
     }
   };
 
+  const cancelSOS = () => {
+    setSOSActive(false);
+    if (connRef.current && connRef.current.open) {
+      connRef.current.send({ type: 'SOS_CANCELED', name: userName });
+    }
+  };
+
   const handleBlackoutTap = () => {
     tapCountRef.current += 1;
     if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
     if (tapCountRef.current >= 5) {
       tapCountRef.current = 0;
-      setSOSActive(false);
+      cancelSOS();
     } else {
       tapTimerRef.current = setTimeout(() => tapCountRef.current = 0, 3000);
     }
@@ -338,8 +355,17 @@ export default function ClientDashboard() {
   };
 
   if (isSOSActive) {
-    return <div className="blackout-screen" onClick={handleBlackoutTap} style={{ userSelect: 'none', cursor: 'default' }} />;
+    return (
+      <div className="blackout-screen" onClick={handleBlackoutTap} style={{ userSelect: 'none', cursor: 'default', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', paddingBottom: '40px' }}>
+         <button onClick={(e) => { e.stopPropagation(); cancelSOS(); }} style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: 'rgba(255,255,255,0.5)', padding: '12px 24px', borderRadius: '24px', fontSize: '14px', zIndex: 10 }}>Mantener pulsado para cancelar SOS</button>
+      </div>
+    );
   }
+
+  // Effect to clean old messages on load
+  useEffect(() => {
+    cleanOldMessages();
+  }, [cleanOldMessages]);
 
   return (
     <div className="client-container" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px', height: '100dvh', position: 'relative', overflow: 'hidden' }}>
@@ -369,13 +395,21 @@ export default function ClientDashboard() {
 
       {/* Mini Map */}
       <div style={{ flex: 1, minHeight: '200px', borderRadius: '20px', overflow: 'hidden', border: '2px solid rgba(255,255,255,0.1)', position: 'relative' }}>
-        <MapContainer center={myLocation || [-34.6037, -58.3816]} zoom={15} style={{ height: '100%', width: '100%' }} zoomControl={false} dragging={false}>
+        <MapContainer center={myLocation || [-34.6037, -58.3816]} zoom={15} style={{ height: '100%', width: '100%' }} zoomControl={false} dragging={true}>
           <MapAutoCenter target={myLocation} />
           <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
-          {myLocation && <Marker position={myLocation} />}
+          
+          {myLocation && (
+            <Marker position={myLocation} icon={L.divIcon({ className: 'custom-avatar-marker', html: avatarBase64 ? `<div style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid #4ade80;box-shadow:0 0 10px rgba(74,222,128,0.5);"><img src="${avatarBase64}" style="width:100%;height:100%;object-fit:cover;" /></div>` : `<div style="width:24px;height:24px;background:#4ade80;border-radius:50%;border:2px solid white;"></div>`, iconSize: [36, 36], iconAnchor: [18, 18] })} />
+          )}
+
+          {monitorLocation && (
+            <Marker position={[monitorLocation.lat, monitorLocation.lng]} icon={L.divIcon({ className: 'monitor-avatar-marker', html: monitorLocation.avatar ? `<div style="width:40px;height:40px;border-radius:50%;overflow:hidden;border:2px solid #8b5cf6;box-shadow:0 0 10px rgba(139,92,246,0.5);"><img src="${monitorLocation.avatar}" style="width:100%;height:100%;object-fit:cover;" /></div>` : `<div style="width:28px;height:28px;background:#8b5cf6;border-radius:50%;border:2px solid white;"></div>`, iconSize: [40, 40], iconAnchor: [20, 20] })} />
+          )}
+
         </MapContainer>
         <div style={{ position: 'absolute', bottom: 10, left: 10, right: 10, zIndex: 1000, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(10px)', padding: '8px 12px', borderRadius: '12px', textAlign: 'center', fontSize: '12px', color: '#ccc' }}>
-          {myLocation ? 'Compartiendo ubicación en tiempo real' : 'Obteniendo GPS...'}
+          {ghostModeActive ? '👻 Modo Sigilo Activado' : (myLocation ? 'Compartiendo ubicación en tiempo real' : 'Obteniendo GPS...')}
         </div>
       </div>
 
