@@ -55,6 +55,25 @@ export default function MonitorDashboard() {
   const [alarmActive, setAlarmActive] = useState<{ active: boolean; originName: string }>({ active: false, originName: '' });
   const [mapCenterTarget, setMapCenterTarget] = useState<[number, number] | null>(null);
   
+  // Caché de íconos para evitar parpadeos masivos del mapa
+  const markerIconCache = useRef<Record<string, L.DivIcon>>({});
+  const getAvatarIcon = (id: string, avatar: string | null, isOnline: boolean, isMonitor: boolean) => {
+    const cacheKey = `${id}_${isOnline ? 'on' : 'off'}_${avatar ? 'avatar' : 'no_avatar'}`;
+    if (!markerIconCache.current[cacheKey]) {
+      const size = isMonitor ? 36 : 40;
+      const color = isMonitor ? '#8b5cf6' : (isOnline ? '#4ade80' : '#9ca3af');
+      markerIconCache.current[cacheKey] = L.divIcon({
+        className: 'custom-avatar-marker',
+        html: avatar 
+          ? `<div style="width:${size}px;height:${size}px;border-radius:50%;overflow:hidden;border:3px solid ${color};box-shadow:0 0 10px ${color};"><img src="${avatar}" style="width:100%;height:100%;object-fit:cover;" /></div>` 
+          : `<div style="width:${size}px;height:${size}px;background:${color};border-radius:50%;border:2px solid white;"></div>`,
+        iconSize: [size, size],
+        iconAnchor: [size/2, size/2]
+      });
+    }
+    return markerIconCache.current[cacheKey];
+  };
+  
   const audioCtxRef = useRef<AudioContext | null>(null);
   const oscillatorRef = useRef<OscillatorNode | null>(null);
   const peerRef = useRef<Peer | null>(null);
@@ -89,8 +108,13 @@ export default function MonitorDashboard() {
         }).then(id => watchId = id);
       }
     });
+    
     cleanOldMessages();
-    return () => { if (watchId) Geolocation.clearWatch({ id: watchId }); }
+    const interval = setInterval(cleanOldMessages, 60 * 60 * 1000); // Barredor 24hs continuo
+    return () => { 
+      if (watchId) Geolocation.clearWatch({ id: watchId }); 
+      clearInterval(interval);
+    }
   }, [avatarBase64, cleanOldMessages]);
 
   // P2P Setup
@@ -344,7 +368,7 @@ export default function MonitorDashboard() {
         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
         {myLocation && (
           <>
-            <Marker position={myLocation} icon={L.divIcon({ className: 'custom-avatar-marker', html: avatarBase64 ? `<div style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid #8b5cf6;box-shadow:0 0 10px rgba(139,92,246,0.5);"><img src="${avatarBase64}" style="width:100%;height:100%;object-fit:cover;" /></div>` : `<div style="width:24px;height:24px;background:#8b5cf6;border-radius:50%;border:2px solid white;"></div>`, iconSize: [36, 36], iconAnchor: [18, 18] })}>
+            <Marker position={myLocation} icon={getAvatarIcon('monitor', avatarBase64, true, true)}>
               <Popup>Tú (Monitor)</Popup>
             </Marker>
             <Circle center={myLocation} radius={localRadius} pathOptions={{ color: '#4f46e5', fillOpacity: 0.1, weight: 2, dashArray: "5, 5" }} />
@@ -353,7 +377,7 @@ export default function MonitorDashboard() {
         {Object.entries(clients).map(([id, client]) => {
           if (client.lat === 0 && client.lng === 0) return null;
           return (
-            <Marker key={id} position={[client.lat, client.lng]} opacity={client.isOnline ? 1 : 0.5} icon={L.divIcon({ className: 'custom-avatar-marker', html: client.avatar ? `<div style="width:40px;height:40px;border-radius:50%;overflow:hidden;border:3px solid ${client.isOnline ? '#4ade80' : '#9ca3af'};box-shadow:0 0 10px rgba(74,222,128,0.5);"><img src="${client.avatar}" style="width:100%;height:100%;object-fit:cover;" /></div>` : `<div style="width:24px;height:24px;background:${client.isOnline ? '#4ade80' : '#9ca3af'};border-radius:50%;border:2px solid white;"></div>`, iconSize: [40, 40], iconAnchor: [20, 20] })}>
+            <Marker key={id} position={[client.lat, client.lng]} opacity={client.isOnline ? 1 : 0.5} icon={getAvatarIcon(id, client.avatar, client.isOnline, false)}>
               <Popup><strong>{client.name}</strong> <br/>{client.isOnline ? 'GPS en tiempo real' : 'Última ubicación conocida'}</Popup>
             </Marker>
           );

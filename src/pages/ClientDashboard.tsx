@@ -61,6 +61,10 @@ export default function ClientDashboard() {
   const wakeLockRef = useRef<any>(null);
   const lastPingRef = useRef<number>(Date.now());
 
+  // Caché de íconos para evitar parpadeos
+  const myIconRef = useRef(L.divIcon({ className: 'custom-avatar-marker', html: avatarBase64 ? `<div style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid #4ade80;box-shadow:0 0 10px rgba(74,222,128,0.5);"><img src="${avatarBase64}" style="width:100%;height:100%;object-fit:cover;" /></div>` : `<div style="width:24px;height:24px;background:#4ade80;border-radius:50%;border:2px solid white;"></div>`, iconSize: [36, 36], iconAnchor: [18, 18] }));
+  const monitorIconCache = useRef<Record<string, L.DivIcon>>({});
+
   const acquireWakeLock = async () => {
     try {
       if ('wakeLock' in navigator && !wakeLockRef.current) {
@@ -145,9 +149,11 @@ export default function ClientDashboard() {
     if (!masterServerId) return;
 
     const connectPeer = () => {
-      if (peerRef.current) peerRef.current.destroy();
-      const peer = new Peer();
-      peerRef.current = peer;
+    if (peerRef.current) peerRef.current.destroy();
+    // FIJAR PEER ID: Evita crear clones zombis en el monitor si se reconecta.
+    const savedPeerId = useStore.getState().myPeerId;
+    const peer = savedPeerId ? new Peer(savedPeerId) : new Peer();
+    peerRef.current = peer;
 
       peer.on('open', (id) => {
         setMyPeerId(id);
@@ -181,7 +187,11 @@ export default function ClientDashboard() {
              releaseWakeLock();
              if (!useStore.getState().isSOSActive) playRemoteAlarm();
           }
-          if (data.type === 'STOP_REMOTE_SOS') stopRemoteAlarm();
+          if (data.type === 'STOP_REMOTE_SOS') {
+             stopRemoteAlarm();
+             setGhostModeActive(false);
+             if (!useStore.getState().isSOSActive) releaseWakeLock();
+          }
           if (data.type === 'GHOST_MODE') {
              setGhostModeActive(true);
              acquireWakeLock(); // Prohibe apagar pantalla
@@ -429,9 +439,11 @@ export default function ClientDashboard() {
     );
   }
 
-  // Effect to clean old messages on load
+  // Effect to clean old messages periodically (Barredor 24hs real)
   useEffect(() => {
     cleanOldMessages();
+    const interval = setInterval(cleanOldMessages, 60 * 60 * 1000); // Cada 1 hora
+    return () => clearInterval(interval);
   }, [cleanOldMessages]);
 
   return (
@@ -468,11 +480,17 @@ export default function ClientDashboard() {
           <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
           
           {myLocation && (
-            <Marker position={myLocation} icon={L.divIcon({ className: 'custom-avatar-marker', html: avatarBase64 ? `<div style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid #4ade80;box-shadow:0 0 10px rgba(74,222,128,0.5);"><img src="${avatarBase64}" style="width:100%;height:100%;object-fit:cover;" /></div>` : `<div style="width:24px;height:24px;background:#4ade80;border-radius:50%;border:2px solid white;"></div>`, iconSize: [36, 36], iconAnchor: [18, 18] })} />
+            <Marker position={myLocation} icon={myIconRef.current} />
           )}
 
           {monitorLocation && (
-            <Marker position={[monitorLocation.lat, monitorLocation.lng]} icon={L.divIcon({ className: 'monitor-avatar-marker', html: monitorLocation.avatar ? `<div style="width:40px;height:40px;border-radius:50%;overflow:hidden;border:2px solid #8b5cf6;box-shadow:0 0 10px rgba(139,92,246,0.5);"><img src="${monitorLocation.avatar}" style="width:100%;height:100%;object-fit:cover;" /></div>` : `<div style="width:28px;height:28px;background:#8b5cf6;border-radius:50%;border:2px solid white;"></div>`, iconSize: [40, 40], iconAnchor: [20, 20] })} />
+            <Marker position={[monitorLocation.lat, monitorLocation.lng]} icon={(() => {
+              const cacheKey = monitorLocation.avatar ? 'avatar' : 'no_avatar';
+              if (!monitorIconCache.current[cacheKey]) {
+                monitorIconCache.current[cacheKey] = L.divIcon({ className: 'monitor-avatar-marker', html: monitorLocation.avatar ? `<div style="width:40px;height:40px;border-radius:50%;overflow:hidden;border:2px solid #8b5cf6;box-shadow:0 0 10px rgba(139,92,246,0.5);"><img src="${monitorLocation.avatar}" style="width:100%;height:100%;object-fit:cover;" /></div>` : `<div style="width:28px;height:28px;background:#8b5cf6;border-radius:50%;border:2px solid white;"></div>`, iconSize: [40, 40], iconAnchor: [20, 20] });
+              }
+              return monitorIconCache.current[cacheKey];
+            })()} />
           )}
 
         </MapContainer>
