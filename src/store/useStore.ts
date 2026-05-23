@@ -77,3 +77,83 @@ export const useStore = create<AppState>()(
     }
   )
 );
+
+export const playTonalSound = (type: 'CHAT_RECEIVE' | 'P2P_HANDSHAKE' | 'P2P_LOST' | 'GEOFENCE_BREACH' | 'PTT_START') => {
+  try {
+    const ctx = (window as any).globalAudioCtx;
+    if (!ctx) return;
+    
+    // Auto-resume if context was suspended by browser autoplays
+    if (ctx.state === 'suspended') {
+      ctx.resume();
+    }
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    const now = ctx.currentTime;
+
+    switch (type) {
+      case 'CHAT_RECEIVE':
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(0.12, now);
+        osc.frequency.setValueAtTime(880, now);
+        osc.frequency.setValueAtTime(1100, now + 0.08);
+        gain.gain.setValueAtTime(0, now + 0.16);
+        osc.start(now);
+        osc.stop(now + 0.16);
+        break;
+
+      case 'P2P_HANDSHAKE':
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(0.08, now);
+        osc.frequency.setValueAtTime(440, now);
+        osc.frequency.exponentialRampToValueAtTime(880, now + 0.15);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+        osc.start(now);
+        osc.stop(now + 0.15);
+        break;
+
+      case 'P2P_LOST':
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(0.08, now);
+        osc.frequency.setValueAtTime(480, now);
+        osc.frequency.exponentialRampToValueAtTime(240, now + 0.3);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+        osc.start(now);
+        osc.stop(now + 0.3);
+        break;
+
+      case 'GEOFENCE_BREACH':
+        osc.type = 'triangle';
+        gain.gain.setValueAtTime(0.15, now);
+        osc.frequency.setValueAtTime(580, now);
+        gain.gain.setValueAtTime(0, now + 0.1);
+        
+        gain.gain.setValueAtTime(0.15, now + 0.2);
+        osc.frequency.setValueAtTime(580, now + 0.2);
+        gain.gain.setValueAtTime(0, now + 0.3);
+        
+        gain.gain.setValueAtTime(0.15, now + 0.4);
+        osc.frequency.setValueAtTime(580, now + 0.4);
+        gain.gain.setValueAtTime(0, now + 0.5);
+
+        osc.start(now);
+        osc.stop(now + 0.5);
+        break;
+
+      case 'PTT_START':
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(0.08, now);
+        osc.frequency.setValueAtTime(520, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+        osc.start(now);
+        osc.stop(now + 0.05);
+        break;
+    }
+  } catch (e) {
+    console.warn("Could not play tonal sound:", e);
+  }
+};

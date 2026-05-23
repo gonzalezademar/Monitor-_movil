@@ -1,12 +1,12 @@
 // Radar Familiar - Production Version - Code Freeze
-import { useStore, type ChatMessage } from '../store/useStore';
+import { useStore, playTonalSound, type ChatMessage } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { useRef, useEffect, useState } from 'react';
 import Peer from 'peerjs';
 import { Geolocation } from '@capacitor/geolocation';
 import { MapContainer, TileLayer, Marker, useMap, Popup } from 'react-leaflet';
 import L from 'leaflet';
-import { ShieldAlert, Bell, MessageSquare, LogOut, CheckCircle, Mic, Send, X, Clock, Camera, Menu, Focus, Trash, Smartphone, Sun, Moon } from 'lucide-react';
+import { ShieldAlert, Bell, MessageSquare, LogOut, CheckCircle, Mic, Send, X, Clock, Camera, Menu, Focus, Trash, Smartphone, Sun, Moon, Image } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
@@ -65,7 +65,9 @@ export default function ClientDashboard() {
   const wakeLockRef = useRef<any>(null);
   const lastPingRef = useRef<number>(Date.now());
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const discardRecordingRef = useRef<boolean>(false);
+  const isConnectedRef = useRef(false);
 
   // Caché de íconos para evitar parpadeos
   const myIconRef = useRef(L.divIcon({ className: 'custom-avatar-marker', html: avatarBase64 ? `<div style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid #4ade80;box-shadow:0 0 10px rgba(74,222,128,0.5);"><img src="${avatarBase64}" style="width:100%;height:100%;object-fit:cover;" /></div>` : `<div style="width:24px;height:24px;background:#4ade80;border-radius:50%;border:2px solid white;"></div>`, iconSize: [36, 36], iconAnchor: [18, 18] }));
@@ -182,7 +184,9 @@ export default function ClientDashboard() {
         
         conn.on('open', () => {
           setIsConnected(true);
+          isConnectedRef.current = true;
           reconnectAttemptsRef.current = 0; // Reset backoff
+          playTonalSound('P2P_HANDSHAKE');
           
           // Enviar perfil pesado SOLO una vez al conectar
           conn.send({ type: 'USER_PROFILE', name: userName, avatar: avatarBase64 });
@@ -234,6 +238,7 @@ export default function ClientDashboard() {
           }
           if (data.type === 'CHAT_MSG') {
              addMessage(data.message);
+             playTonalSound('CHAT_RECEIVE');
           }
           // Activar latido (Anti-Zombi)
           lastPingRef.current = Date.now();
@@ -248,8 +253,16 @@ export default function ClientDashboard() {
           }
         });
         
-        conn.on('close', () => setIsConnected(false));
-        conn.on('error', () => setIsConnected(false));
+        conn.on('close', () => {
+          if (isConnectedRef.current) playTonalSound('P2P_LOST');
+          setIsConnected(false);
+          isConnectedRef.current = false;
+        });
+        conn.on('error', () => {
+          if (isConnectedRef.current) playTonalSound('P2P_LOST');
+          setIsConnected(false);
+          isConnectedRef.current = false;
+        });
       });
     };
 
@@ -415,6 +428,7 @@ export default function ClientDashboard() {
 
       mediaRecorderRef.current.start();
       setIsRecording(true);
+      playTonalSound('PTT_START');
     } catch (err) {
       console.error('Error al acceder al micrófono', err);
       setIsProcessingMic(false);
@@ -706,6 +720,7 @@ export default function ClientDashboard() {
         {/* Input Area WhatsApp Style */}
         <div style={{ padding: '20px', background: 'rgba(255,255,255,0.05)', display: 'flex', gap: '10px', alignItems: 'center' }}>
           <input type="file" ref={fileInputRef} accept="image/*" style={{ display: 'none' }} onChange={handleImageSelect} />
+          <input type="file" ref={cameraInputRef} accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleImageSelect} />
 
           {/* Si está grabando, oculta los botones de foto e input de texto */}
           {isRecording ? (
@@ -726,8 +741,13 @@ export default function ClientDashboard() {
             </div>
           ) : (
             <>
-              <button onClick={() => fileInputRef.current?.click()} style={{ background: 'none', border: 'none', color: '#ccc', padding: '8px' }} title="Enviar Foto">
+              {/* Botón de Cámara Directa */}
+              <button onClick={() => cameraInputRef.current?.click()} style={{ background: 'none', border: 'none', color: '#ccc', padding: '6px' }} title="Hacer Foto">
                 <Camera size={22} />
+              </button>
+              {/* Botón de Galería */}
+              <button onClick={() => fileInputRef.current?.click()} style={{ background: 'none', border: 'none', color: '#ccc', padding: '6px' }} title="Elegir de Galería">
+                <Image size={22} />
               </button>
               <input type="text" value={textInput} onChange={(e) => setTextInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSendText()} placeholder="Mensaje rápido..." style={{ flex: 1, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', padding: '12px 16px', borderRadius: '24px', color: 'white', outline: 'none' }} />
             </>

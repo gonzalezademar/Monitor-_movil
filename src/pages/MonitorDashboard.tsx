@@ -2,10 +2,10 @@ import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-le
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { useState, useEffect, useRef } from 'react';
-import { useStore, type ChatMessage } from '../store/useStore';
+import { useStore, playTonalSound, type ChatMessage } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { QRCode } from 'react-qr-code';
-import { Menu, X, QrCode, LogOut, Focus, AlertCircle, ShieldAlert, Smartphone, BellOff, MessageSquare, Send, Mic, MapPin, Ghost, Bell, Camera, Trash, Sun, Moon } from 'lucide-react';
+import { Menu, X, QrCode, LogOut, Focus, AlertCircle, ShieldAlert, Smartphone, BellOff, MessageSquare, Send, Mic, MapPin, Ghost, Bell, Camera, Trash, Sun, Moon, Image } from 'lucide-react';
 import Peer from 'peerjs';
 import { Geolocation } from '@capacitor/geolocation';
 
@@ -94,7 +94,9 @@ export default function MonitorDashboard() {
   const audioChunksRef = useRef<Blob[]>([]);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const discardRecordingRef = useRef<boolean>(false);
+  const isConnectedRef = useRef<Record<string, boolean>>({});
 
   const showToast = (msg: string) => {
     const id = Date.now();
@@ -132,10 +134,10 @@ export default function MonitorDashboard() {
 
     const peer = new Peer(masterServerId);
     peerRef.current = peer;
-
     peer.on('connection', (conn) => {
-      
       conn.on('open', () => {
+         isConnectedRef.current[conn.peer] = true;
+         playTonalSound('P2P_HANDSHAKE');
          const currentQueue = useStore.getState().offlineQueue;
          if (currentQueue.length > 0) {
             currentQueue.forEach(action => conn.send(action));
@@ -174,8 +176,10 @@ export default function MonitorDashboard() {
               
               if (currentStrikes === 3) {
                 showToast(`⚠️ ${data.name} salió de la zona segura (${Math.round(dist)}m)`);
+                playTonalSound('GEOFENCE_BREACH');
               } else if (currentStrikes > 3 && currentStrikes % 10 === 0) {
                 showToast(`⚠️ ${data.name} sigue fuera de zona (${Math.round(dist)}m)`);
+                playTonalSound('GEOFENCE_BREACH');
               }
             } else {
               if ((geofenceStrikesRef.current[data.name] || 0) >= 3) {
@@ -212,7 +216,34 @@ export default function MonitorDashboard() {
         if (data.type === 'CHAT_MSG') {
            addMessage(data.message);
            showToast(`💬 Mensaje de ${data.message.senderName}`);
+           playTonalSound('CHAT_RECEIVE');
         }
+      });
+
+      conn.on('close', () => {
+        if (isConnectedRef.current[conn.peer]) {
+          playTonalSound('P2P_LOST');
+        }
+        isConnectedRef.current[conn.peer] = false;
+        setClients(prev => {
+          if (prev[conn.peer]) {
+            return { ...prev, [conn.peer]: { ...prev[conn.peer], isOnline: false } };
+          }
+          return prev;
+        });
+      });
+
+      conn.on('error', () => {
+        if (isConnectedRef.current[conn.peer]) {
+          playTonalSound('P2P_LOST');
+        }
+        isConnectedRef.current[conn.peer] = false;
+        setClients(prev => {
+          if (prev[conn.peer]) {
+            return { ...prev, [conn.peer]: { ...prev[conn.peer], isOnline: false } };
+          }
+          return prev;
+        });
       });
     });
 
@@ -376,6 +407,7 @@ export default function MonitorDashboard() {
       };
       mediaRecorderRef.current.start();
       setIsRecording(true);
+      playTonalSound('PTT_START');
     } catch (err) {
       showToast('Error al acceder al micrófono');
       setIsProcessingMic(false);
@@ -645,9 +677,9 @@ export default function MonitorDashboard() {
           {messages.length === 0 && <p style={{ textAlign: 'center', opacity: 0.5, marginTop: '50px' }}>No hay mensajes. Usa el PTT para enviar un audio táctico o fotos.</p>}
         </div>
 
-        {/* Input Area WhatsApp Style */}
         <div style={{ padding: '20px', background: 'rgba(255,255,255,0.05)', display: 'flex', gap: '10px', alignItems: 'center' }}>
           <input type="file" ref={fileInputRef} accept="image/*" style={{ display: 'none' }} onChange={handleImageSelect} />
+          <input type="file" ref={cameraInputRef} accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleImageSelect} />
 
           {/* Si está grabando, oculta los botones de foto e input de texto */}
           {isRecording ? (
@@ -668,8 +700,13 @@ export default function MonitorDashboard() {
             </div>
           ) : (
             <>
-              <button onClick={() => fileInputRef.current?.click()} style={{ background: 'none', border: 'none', color: '#ccc', padding: '8px' }} title="Enviar Foto">
+              {/* Botón de Cámara Directa */}
+              <button onClick={() => cameraInputRef.current?.click()} style={{ background: 'none', border: 'none', color: '#ccc', padding: '6px' }} title="Hacer Foto">
                 <Camera size={22} />
+              </button>
+              {/* Botón de Galería */}
+              <button onClick={() => fileInputRef.current?.click()} style={{ background: 'none', border: 'none', color: '#ccc', padding: '6px' }} title="Elegir de Galería">
+                <Image size={22} />
               </button>
               <input type="text" value={textInput} onChange={(e) => setTextInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSendText()} placeholder="Mensaje rápido..." style={{ flex: 1, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', padding: '12px 16px', borderRadius: '24px', color: 'white', outline: 'none' }} />
             </>
