@@ -59,10 +59,10 @@ jobs:
           ANDROID_HOME: /usr/local/lib/android/sdk
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
-      # 7.1. Inyectar permisos de Cámara y Audio en el AndroidManifest.xml generado
-      - name: 🔐 Configurar Permisos de Android (Cámara y WebRTC)
+      # 7.1. Inyectar permisos de Cámara, Audio y GPS en el AndroidManifest.xml generado
+      - name: 🔐 Configurar Permisos de Android (Cámara, WebRTC y GPS)
         run: |
-          sed -i 's|</manifest>|    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n</manifest>|g' android/app/src/main/AndroidManifest.xml
+          sed -i 's|</manifest>|    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n</manifest>|g' android/app/src/main/AndroidManifest.xml
 
       # 8. Generar íconos Android personalizados desde resources/icon.png
       - name: 🎨 Generar íconos Android personalizados

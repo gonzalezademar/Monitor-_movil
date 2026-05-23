@@ -1,4 +1,4 @@
-import { MapContainer, TileLayer, Marker, Popup, Circle } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { useState, useEffect, useRef } from 'react';
@@ -21,6 +21,17 @@ L.Icon.Default.mergeOptions({
   shadowUrl: markerShadow,
 });
 
+// Componente auxiliar para mover el mapa dinámicamente
+function MapAutoCenter({ target }: { target: [number, number] | null }) {
+  const map = useMap();
+  useEffect(() => {
+    if (target) {
+      map.flyTo(target, 16, { animate: true, duration: 1.5 });
+    }
+  }, [target, map]);
+  return null;
+}
+
 export default function MonitorDashboard() {
   const [showQR, setShowQR] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -33,6 +44,8 @@ export default function MonitorDashboard() {
   // Estado para los Hijos conectados { peerId: { lat, lng, name } }
   const [clients, setClients] = useState<Record<string, { lat: number; lng: number; name: string }>>({});
   const [alarmActive, setAlarmActive] = useState<{ active: boolean; originName: string }>({ active: false, originName: '' });
+  const [mapCenterTarget, setMapCenterTarget] = useState<[number, number] | null>(null);
+  
   const audioCtxRef = useRef<AudioContext | null>(null);
   const oscillatorRef = useRef<OscillatorNode | null>(null);
 
@@ -46,10 +59,16 @@ export default function MonitorDashboard() {
     peer.on('connection', (conn) => {
       conn.on('data', (data: any) => {
         if (data.type === 'LOCATION') {
-          setClients((prev) => ({
-            ...prev,
-            [conn.peer]: { lat: data.lat, lng: data.lng, name: data.name }
-          }));
+          setClients((prev) => {
+            // Auto-centrar en el primer hijo la primera vez que se recibe ubicación
+            if (Object.keys(prev).length === 0) {
+              setMapCenterTarget([data.lat, data.lng]);
+            }
+            return {
+              ...prev,
+              [conn.peer]: { lat: data.lat, lng: data.lng, name: data.name }
+            };
+          });
         }
         
         if (data.type === 'SOS_ALERT') {
@@ -123,9 +142,21 @@ export default function MonitorDashboard() {
     navigate('/');
   };
 
+  const handleCenterMap = () => {
+    // Centrar en el primer hijo disponible
+    const firstClient = Object.values(clients)[0];
+    if (firstClient) {
+      setMapCenterTarget([firstClient.lat, firstClient.lng]);
+    } else {
+      // Si no hay hijos, centrar en el Padre (Obelisco temporalmente)
+      setMapCenterTarget([-34.6037, -58.3816]);
+    }
+  };
+
   return (
     <div className="dashboard-container">
       <MapContainer center={[-34.6037, -58.3816]} zoom={13} style={{ height: '100dvh', width: '100vw' }}>
+        <MapAutoCenter target={mapCenterTarget} />
         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
         
         {/* Padre */}
@@ -187,7 +218,7 @@ export default function MonitorDashboard() {
 
       {/* Barra Inferior (Acciones Rápidas) */}
       <div className="bottom-bar">
-        <button className="bottom-action">
+        <button className="bottom-action" onClick={handleCenterMap}>
           <Focus size={22} />
           <span>Centrar</span>
         </button>
