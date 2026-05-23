@@ -59,6 +59,7 @@ export default function ClientDashboard() {
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const cancelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wakeLockRef = useRef<any>(null);
+  const lastPingRef = useRef<number>(Date.now());
 
   const acquireWakeLock = async () => {
     try {
@@ -122,6 +123,12 @@ export default function ClientDashboard() {
     osc.start();
     oscillatorRef.current = osc;
     setIsRemoteAlarmActive(true);
+    
+    // Fallback disuasivo: Vibración máxima si el dispositivo está silenciado
+    if ('vibrate' in navigator) {
+      navigator.vibrate([500, 200, 500, 200, 500, 200, 500]);
+      setInterval(() => { if (isRemoteAlarmActive) navigator.vibrate([500, 200, 500]); }, 2000);
+    }
   };
 
   const stopRemoteAlarm = () => {
@@ -153,10 +160,11 @@ export default function ClientDashboard() {
           // Enviar perfil pesado SOLO una vez al conectar
           conn.send({ type: 'USER_PROFILE', name: userName, avatar: avatarBase64 });
           
-          // Flush Offline Queue
+          // Flush Offline Queue con Deduplicación (Aduana Anti-Spam)
           const currentQueue = useStore.getState().offlineQueue;
           if (currentQueue.length > 0) {
-             currentQueue.forEach(action => conn.send(action));
+             const uniqueQueue = currentQueue.filter((v, i, a) => a.findIndex(t => (t.type === v.type && t.type === 'CHECK_IN')) === i);
+             uniqueQueue.forEach(action => conn.send(action));
              useStore.getState().clearOfflineQueue();
           }
 
@@ -191,6 +199,9 @@ export default function ClientDashboard() {
           if (data.type === 'CHAT_MSG') {
              addMessage(data.message);
           }
+          // Activar latido (Anti-Zombi)
+          lastPingRef.current = Date.now();
+
           if (data.type === 'SILENT_PING' || data.type === 'GHOST_MODE') {
              // Force update location without alerting user
              Geolocation.getCurrentPosition({ enableHighAccuracy: true }).then(pos => {
@@ -209,8 +220,10 @@ export default function ClientDashboard() {
     connectPeer();
 
     reconnectTimerRef.current = setInterval(() => {
-      // Auto-reconnect Watchdog
-      if (!connRef.current || !connRef.current.open) {
+      const now = Date.now();
+      // Auto-reconnect Watchdog & Zombie killer
+      if (!connRef.current || !connRef.current.open || (now - lastPingRef.current > 15000)) {
+        console.log("Destruyendo conexión zombi y reconectando...");
         connectPeer();
       }
     }, 5000);
@@ -310,8 +323,15 @@ export default function ClientDashboard() {
     setTextInput('');
   };
 
-  const startRecording = async () => {
-    if (isRecording || isProcessingMic) return;
+  const toggleRecording = async () => {
+    if (isProcessingMic) return;
+
+    if (isRecording) {
+      if (mediaRecorderRef.current) mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      return;
+    }
+
     setIsProcessingMic(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -345,15 +365,6 @@ export default function ClientDashboard() {
       setIsRecording(true);
     } catch (err) {
       console.error('Error al acceder al micrófono', err);
-      setIsProcessingMic(false);
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    } else {
       setIsProcessingMic(false);
     }
   };
@@ -425,6 +436,7 @@ export default function ClientDashboard() {
 
   return (
     <div className="client-container" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px', height: '100dvh', position: 'relative', overflow: 'hidden' }}>
+      <div className="neon-line"></div>
       
       {/* Header Info */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.05)', padding: '12px 20px', borderRadius: '16px' }}>
@@ -533,15 +545,14 @@ export default function ClientDashboard() {
           <input type="text" value={textInput} onChange={(e) => setTextInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSendText()} placeholder="Mensaje rápido..." style={{ flex: 1, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', padding: '12px 16px', borderRadius: '24px', color: 'white', outline: 'none' }} />
           
           {textInput.trim() ? (
-            <button onClick={handleSendText} style={{ background: '#4f46e5', border: 'none', color: 'white', width: '44px', height: '44px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Send size={18} />
-            </button>
+            <button onClick={handleSendText} style={{ background: '#4f46e5', border: 'none', color: 'white', width: '44px', height: '44px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Send size={18} /></button>
           ) : (
             <button 
-              onMouseDown={startRecording} onMouseUp={stopRecording} onMouseLeave={stopRecording}
-              onTouchStart={startRecording} onTouchEnd={stopRecording} onTouchMove={stopRecording} onTouchCancel={stopRecording}
-              style={{ background: isRecording ? '#ef4444' : '#8b5cf6', border: 'none', color: 'white', width: '44px', height: '44px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s', animation: isRecording ? 'pulse 1s infinite' : 'none' }}>
-              <Mic size={20} />
+              onClick={toggleRecording} 
+              className={isRecording ? 'recording-pulse' : ''}
+              style={{ background: isRecording ? '#4ade80' : 'rgba(139,92,246,0.6)', border: 'none', color: 'white', width: '44px', height: '44px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.3s' }}
+            >
+              <Mic size={20} color={isRecording ? '#0f172a' : '#fff'} />
             </button>
           )}
         </div>

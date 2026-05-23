@@ -348,3 +348,53 @@ body {
   background-color: black;
   z-index: 9999;
 }
+
+/* EFECTOS VISUALES DINÁMICOS */
+.recording-pulse {
+  animation: pulse-green 1.5s infinite;
+  box-shadow: 0 0 15px #4ade80, inset 0 0 15px #4ade80;
+}
+
+@keyframes pulse-green {
+  0% { transform: scale(1); box-shadow: 0 0 10px #4ade80; }
+  50% { transform: scale(1.1); box-shadow: 0 0 25px #4ade80; }
+  100% { transform: scale(1); box-shadow: 0 0 10px #4ade80; }
+}
+
+.neon-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 2px;
+  width: 100%;
+  background: linear-gradient(90deg, transparent, #8b5cf6, transparent);
+  animation: scan-line 3s linear infinite;
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+@keyframes scan-line {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(100vh); }
+}
+
+.glass-btn {
+  position: relative;
+  overflow: hidden;
+}
+
+.glass-btn::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(255,255,255,0.2) 0%, transparent 60%);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.glass-btn:active::after {
+  opacity: 1;
+}
