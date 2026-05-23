@@ -1,3 +1,4 @@
+// Radar Familiar - Production Version - Code Freeze
 import { useStore, type ChatMessage } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { useRef, useEffect, useState } from 'react';
