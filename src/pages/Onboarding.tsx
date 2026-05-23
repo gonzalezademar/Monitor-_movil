@@ -43,6 +43,19 @@ export default function Onboarding() {
     }
     setNameError('');
     
+    // Hack para saltar el "Autoplay Policy" de navegadores modernos
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const buffer = ctx.createBuffer(1, 1, 22050);
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      source.start(0);
+      ctx.resume();
+    } catch (e) {
+      console.log('Error unlocking audio context', e);
+    }
+    
     // Solicitar permisos críticos anticipadamente
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => stream.getTracks().forEach(t => t.stop())).catch(() => console.log('Mic no autorizado aún'));

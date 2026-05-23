@@ -64,6 +64,11 @@ export default function ClientDashboard() {
   // Caché de íconos para evitar parpadeos
   const myIconRef = useRef(L.divIcon({ className: 'custom-avatar-marker', html: avatarBase64 ? `<div style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid #4ade80;box-shadow:0 0 10px rgba(74,222,128,0.5);"><img src="${avatarBase64}" style="width:100%;height:100%;object-fit:cover;" /></div>` : `<div style="width:24px;height:24px;background:#4ade80;border-radius:50%;border:2px solid white;"></div>`, iconSize: [36, 36], iconAnchor: [18, 18] }));
   const monitorIconCache = useRef<Record<string, L.DivIcon>>({});
+  
+  // Anti-Spam Reconnection Backoff
+  const reconnectAttemptsRef = useRef(0);
+  const lastReconnectTimeRef = useRef(0);
+  const [gpsError, setGpsError] = useState<string | null>(null);
 
   const acquireWakeLock = async () => {
     try {
@@ -149,11 +154,19 @@ export default function ClientDashboard() {
     if (!masterServerId) return;
 
     const connectPeer = () => {
-    if (peerRef.current) peerRef.current.destroy();
-    // FIJAR PEER ID: Evita crear clones zombis en el monitor si se reconecta.
-    const savedPeerId = useStore.getState().myPeerId;
-    const peer = savedPeerId ? new Peer(savedPeerId) : new Peer();
-    peerRef.current = peer;
+      const now = Date.now();
+      const delay = Math.min(5000 * Math.pow(2, reconnectAttemptsRef.current), 60000);
+      if (now - lastReconnectTimeRef.current < delay && reconnectAttemptsRef.current > 0) {
+        return; // Esperar backoff
+      }
+      lastReconnectTimeRef.current = now;
+      reconnectAttemptsRef.current += 1;
+
+      if (peerRef.current) peerRef.current.destroy();
+      // FIJAR PEER ID: Evita crear clones zombis en el monitor si se reconecta.
+      const savedPeerId = useStore.getState().myPeerId;
+      const peer = savedPeerId ? new Peer(savedPeerId) : new Peer();
+      peerRef.current = peer;
 
       peer.on('open', (id) => {
         setMyPeerId(id);
@@ -162,6 +175,7 @@ export default function ClientDashboard() {
         
         conn.on('open', () => {
           setIsConnected(true);
+          reconnectAttemptsRef.current = 0; // Reset backoff
           
           // Enviar perfil pesado SOLO una vez al conectar
           conn.send({ type: 'USER_PROFILE', name: userName, avatar: avatarBase64 });
@@ -251,7 +265,11 @@ export default function ClientDashboard() {
     const startTracking = async () => {
       try {
         const perm = await Geolocation.requestPermissions();
-        if (perm.location !== 'granted') return;
+        if (perm.location !== 'granted') {
+          setGpsError("GPS Denegado. La app no puede protegerte sin ubicación. Por favor, actívalo en los ajustes de tu teléfono.");
+          return;
+        }
+        setGpsError(null);
 
         watchId = await Geolocation.watchPosition(
           { enableHighAccuracy: true, timeout: 10000 },
@@ -450,6 +468,12 @@ export default function ClientDashboard() {
     <div className="client-container" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px', height: '100dvh', position: 'relative', overflow: 'hidden' }}>
       <div className="neon-line"></div>
       
+      {gpsError && (
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, background: '#ef4444', color: 'white', padding: '12px', textAlign: 'center', zIndex: 9999, fontWeight: 'bold' }}>
+          {gpsError}
+        </div>
+      )}
+
       {/* Header Info */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.05)', padding: '12px 20px', borderRadius: '16px' }}>
         <div>

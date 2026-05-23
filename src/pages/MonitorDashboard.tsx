@@ -54,6 +54,7 @@ export default function MonitorDashboard() {
   const [clients, setClients] = useState<Record<string, { lat: number; lng: number; name: string, lastSeen: number, isOnline: boolean, avatar: string | null }>>({});
   const [alarmActive, setAlarmActive] = useState<{ active: boolean; originName: string }>({ active: false, originName: '' });
   const [mapCenterTarget, setMapCenterTarget] = useState<[number, number] | null>(null);
+  const [gpsError, setGpsError] = useState<string | null>(null);
   
   // Caché de íconos para evitar parpadeos masivos del mapa
   const markerIconCache = useRef<Record<string, L.DivIcon>>({});
@@ -100,12 +101,15 @@ export default function MonitorDashboard() {
     let watchId: string | null = null;
     Geolocation.requestPermissions().then(perm => {
       if (perm.location === 'granted') {
+        setGpsError(null);
         Geolocation.watchPosition({ enableHighAccuracy: true }, (pos) => {
            if (pos) {
              setMyLocation([pos.coords.latitude, pos.coords.longitude]);
              broadcastAction({ type: 'MONITOR_LOCATION', lat: pos.coords.latitude, lng: pos.coords.longitude, avatar: avatarBase64 });
            }
         }).then(id => watchId = id);
+      } else {
+        setGpsError("GPS Denegado. La app no puede protegerte sin ubicación. Por favor, actívalo en los ajustes de tu teléfono.");
       }
     });
     
@@ -363,6 +367,11 @@ export default function MonitorDashboard() {
 
   return (
     <div className="dashboard-container" style={{ position: 'relative', overflow: 'hidden' }}>
+      {gpsError && (
+        <div style={{ position: 'absolute', top: 60, left: 0, right: 0, background: '#ef4444', color: 'white', padding: '12px', textAlign: 'center', zIndex: 9999, fontWeight: 'bold' }}>
+          {gpsError}
+        </div>
+      )}
       <MapContainer center={myLocation || [-34.6037, -58.3816]} zoom={13} style={{ height: '100dvh', width: '100vw' }} zoomControl={false}>
         <MapAutoCenter target={mapCenterTarget} />
         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />

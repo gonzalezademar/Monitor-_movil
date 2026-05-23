@@ -56,7 +56,7 @@ export const useStore = create<AppState>()(
       
       messages: [],
       offlineQueue: [],
-      addMessage: (msg) => set((state) => ({ messages: [...state.messages, msg].slice(-50) })), // Keep last 50
+      addMessage: (msg) => set((state) => ({ messages: [...state.messages, msg].slice(-15) })), // Keep last 15
       cleanOldMessages: () => set((state) => ({ 
         messages: state.messages.filter(m => Date.now() - m.timestamp < 24 * 60 * 60 * 1000) 
       })),
@@ -67,6 +67,10 @@ export const useStore = create<AppState>()(
     }),
     {
       name: 'radar-storage',
+      partialize: (state) => ({
+        ...state,
+        messages: state.messages.map(m => m.type === 'AUDIO' ? { ...m, type: 'TEXT', content: '[Audio caducado por ahorro de memoria]' } : m)
+      })
     }
   )
 );
