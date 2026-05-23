@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useRef, useEffect, useState } from 'react';
 import Peer from 'peerjs';
 import { Geolocation } from '@capacitor/geolocation';
-import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, useMap, Popup } from 'react-leaflet';
 import L from 'leaflet';
-import { ShieldAlert, Bell, MessageSquare, LogOut, CheckCircle, Mic, Send, X, Clock } from 'lucide-react';
+import { ShieldAlert, Bell, MessageSquare, LogOut, CheckCircle, Mic, Send, X, Clock, Camera, Menu, Focus, Trash, Smartphone } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
@@ -43,6 +43,8 @@ export default function ClientDashboard() {
   const [myLocation, setMyLocation] = useState<[number, number] | null>(null);
   const [monitorLocation, setMonitorLocation] = useState<{lat: number, lng: number, avatar: string | null} | null>(null);
   const [ghostModeActive, setGhostModeActive] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [mapCenterTarget, setMapCenterTarget] = useState<[number, number] | null>(null);
 
   const audioCtxRef = useRef<AudioContext | null>(null);
   const oscillatorRef = useRef<OscillatorNode | null>(null);
@@ -60,6 +62,8 @@ export default function ClientDashboard() {
   const cancelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wakeLockRef = useRef<any>(null);
   const lastPingRef = useRef<number>(Date.now());
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const discardRecordingRef = useRef<boolean>(false);
 
   // Caché de íconos para evitar parpadeos
   const myIconRef = useRef(L.divIcon({ className: 'custom-avatar-marker', html: avatarBase64 ? `<div style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid #4ade80;box-shadow:0 0 10px rgba(74,222,128,0.5);"><img src="${avatarBase64}" style="width:100%;height:100%;object-fit:cover;" /></div>` : `<div style="width:24px;height:24px;background:#4ade80;border-radius:50%;border:2px solid white;"></div>`, iconSize: [36, 36], iconAnchor: [18, 18] }));
@@ -281,13 +285,14 @@ export default function ClientDashboard() {
           { enableHighAccuracy: true, timeout: 10000 },
           (position) => {
              if (position) {
-                 setMyLocation([position.coords.latitude, position.coords.longitude]);
-                 if (connRef.current && connRef.current.open) {
+                 const coords: [number, number] = [position.coords.latitude, position.coords.longitude];
+                 setMyLocation(coords);
+                 if (connRef.current && connRef.current.open && useStore.getState().isSOSActive) {
                      connRef.current.send({
                          type: 'LOCATION',
                          lat: position.coords.latitude,
                          lng: position.coords.longitude,
-                         name: userName || 'Cliente' // Ligero
+                         name: userName || 'Cliente'
                      });
                  }
              }
@@ -321,7 +326,11 @@ export default function ClientDashboard() {
   }, [isSOSActive, userName, ghostModeActive, enqueueOfflineAction]);
 
   const sendAction = (type: string) => {
-    const action = { type, name: userName };
+    const action: any = { type, name: userName };
+    if (type === 'CHECK_IN' && myLocation) {
+      action.lat = myLocation[0];
+      action.lng = myLocation[1];
+    }
     if (connRef.current && connRef.current.open) {
       connRef.current.send(action);
     } else {
@@ -367,6 +376,7 @@ export default function ClientDashboard() {
     }
 
     setIsProcessingMic(true);
+    discardRecordingRef.current = false;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaRecorderRef.current = new MediaRecorder(stream);
@@ -377,6 +387,12 @@ export default function ClientDashboard() {
       };
 
       mediaRecorderRef.current.onstop = () => {
+        if (discardRecordingRef.current) {
+          discardRecordingRef.current = false;
+          setIsProcessingMic(false);
+          stream.getTracks().forEach(track => track.stop());
+          return;
+        }
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         const reader = new FileReader();
         reader.readAsDataURL(audioBlob);
@@ -401,6 +417,61 @@ export default function ClientDashboard() {
       console.error('Error al acceder al micrófono', err);
       setIsProcessingMic(false);
     }
+  };
+
+  const cancelRecording = () => {
+    discardRecordingRef.current = true;
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+  };
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_SIZE = 400; // Táctico: ultra liviano
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_SIZE) {
+            height *= MAX_SIZE / width;
+            width = MAX_SIZE;
+          }
+        } else {
+          if (height > MAX_SIZE) {
+            width *= MAX_SIZE / height;
+            height = MAX_SIZE;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+
+        const compressedBase64 = canvas.toDataURL('image/jpeg', 0.5);
+
+        const msg: ChatMessage = {
+          id: Date.now().toString(),
+          senderName: userName,
+          type: 'IMAGE',
+          content: compressedBase64,
+          timestamp: Date.now()
+        };
+        dispatchChatMessage(msg);
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleSOSPressStart = () => {
@@ -472,90 +543,113 @@ export default function ClientDashboard() {
   }, [cleanOldMessages]);
 
   return (
-    <div className="client-container" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px', height: '100dvh', position: 'relative', overflow: 'hidden' }}>
-      <div className="neon-line"></div>
-      
+    <div className="dashboard-container" style={{ position: 'relative', overflow: 'hidden' }}>
       {gpsError && (
-        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, background: '#ef4444', color: 'white', padding: '12px', textAlign: 'center', zIndex: 9999, fontWeight: 'bold' }}>
+        <div style={{ position: 'absolute', top: 60, left: 0, right: 0, background: '#ef4444', color: 'white', padding: '12px', textAlign: 'center', zIndex: 9999, fontWeight: 'bold' }}>
           {gpsError}
         </div>
       )}
 
-      {/* Header Info */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.05)', padding: '12px 20px', borderRadius: '16px' }}>
-        <div>
-          <p style={{ fontSize: '13px', opacity: 0.6, margin: 0 }}>Hub de Seguridad</p>
-          <strong style={{ fontSize: '18px' }}>{userName}</strong>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0,0,0,0.2)', padding: '6px 12px', borderRadius: '20px' }}>
-          {!isConnected && offlineQueue.length > 0 && <Clock size={14} color="#facc15" />}
-          <span style={{ width: 10, height: 10, borderRadius: '50%', background: isConnected ? '#4ade80' : '#facc15', animation: !isConnected ? 'pulse 1s infinite' : 'none' }} />
-          <span style={{ fontSize: '12px', fontWeight: 'bold', color: isConnected ? '#4ade80' : '#facc15' }}>
-            {isConnected ? 'Protegido' : 'Desconectado'}
-          </span>
-        </div>
-      </div>
+      <MapContainer center={myLocation || [-34.6037, -58.3816]} zoom={15} style={{ height: '100dvh', width: '100vw' }} zoomControl={false}>
+        <MapAutoCenter target={mapCenterTarget} />
+        <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
+        
+        {myLocation && (
+          <Marker position={myLocation} icon={myIconRef.current}>
+            <Popup>Tú (Rastreable)</Popup>
+          </Marker>
+        )}
 
+        {monitorLocation && (
+          <Marker position={[monitorLocation.lat, monitorLocation.lng]} icon={(() => {
+            const cacheKey = monitorLocation.avatar ? 'avatar' : 'no_avatar';
+            if (!monitorIconCache.current[cacheKey]) {
+              monitorIconCache.current[cacheKey] = L.divIcon({ 
+                className: 'monitor-avatar-marker', 
+                html: monitorLocation.avatar 
+                  ? `<div style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid #8b5cf6;box-shadow:0 0 10px rgba(139,92,246,0.5);"><img src="${monitorLocation.avatar}" style="width:100%;height:100%;object-fit:cover;" /></div>` 
+                  : `<div style="width:24px;height:24px;background:#8b5cf6;border-radius:50%;border:2px solid white;"></div>`, 
+                iconSize: [36, 36], 
+                iconAnchor: [18, 18] 
+              });
+            }
+            return monitorIconCache.current[cacheKey];
+          })()}>
+            <Popup>Monitor (Padre)</Popup>
+          </Marker>
+        )}
+      </MapContainer>
+
+      {/* Alerta de Alarma Remota del Padre */}
       {isRemoteAlarmActive && (
-        <div style={{ background: '#ef4444', color: 'white', padding: '16px', borderRadius: '16px', textAlign: 'center', animation: 'pulse 1.5s infinite' }}>
-          <Bell size={32} style={{ margin: '0 auto 8px' }} />
-          <h3 style={{ margin: 0 }}>ALARMA ACTIVADA POR EL MONITOR</h3>
-          <button onClick={stopRemoteAlarm} style={{ marginTop: '12px', background: 'white', color: '#ef4444', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold' }}>APAGAR</button>
+        <div style={{ position: 'absolute', top: 80, left: '50%', transform: 'translateX(-50%)', zIndex: 9999, background: '#ef4444', color: 'white', padding: '16px 24px', borderRadius: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', boxShadow: '0 8px 32px rgba(239, 68, 68, 0.4)', animation: 'pulse 1.5s infinite' }}>
+          <Bell size={28} />
+          <strong style={{ fontSize: '14px' }}>¡Sirena remota activada!</strong>
+          <button onClick={stopRemoteAlarm} style={{ background: 'white', color: '#ef4444', border: 'none', padding: '6px 12px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer' }}>APAGAR</button>
         </div>
       )}
 
-      {/* Mini Map */}
-      <div style={{ flex: 1, minHeight: '200px', borderRadius: '20px', overflow: 'hidden', border: '2px solid rgba(255,255,255,0.1)', position: 'relative' }}>
-        <MapContainer center={myLocation || [-34.6037, -58.3816]} zoom={15} style={{ height: '100%', width: '100%' }} zoomControl={false} dragging={true}>
-          <MapAutoCenter target={myLocation} />
-          <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
-          
-          {myLocation && (
-            <Marker position={myLocation} icon={myIconRef.current} />
-          )}
-
-          {monitorLocation && (
-            <Marker position={[monitorLocation.lat, monitorLocation.lng]} icon={(() => {
-              const cacheKey = monitorLocation.avatar ? 'avatar' : 'no_avatar';
-              if (!monitorIconCache.current[cacheKey]) {
-                monitorIconCache.current[cacheKey] = L.divIcon({ className: 'monitor-avatar-marker', html: monitorLocation.avatar ? `<div style="width:40px;height:40px;border-radius:50%;overflow:hidden;border:2px solid #8b5cf6;box-shadow:0 0 10px rgba(139,92,246,0.5);"><img src="${monitorLocation.avatar}" style="width:100%;height:100%;object-fit:cover;" /></div>` : `<div style="width:28px;height:28px;background:#8b5cf6;border-radius:50%;border:2px solid white;"></div>`, iconSize: [40, 40], iconAnchor: [20, 20] });
-              }
-              return monitorIconCache.current[cacheKey];
-            })()} />
-          )}
-
-        </MapContainer>
-        <div style={{ position: 'absolute', bottom: 10, left: 10, right: 10, zIndex: 1000, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(10px)', padding: '8px 12px', borderRadius: '12px', textAlign: 'center', fontSize: '12px', color: '#ccc' }}>
-          {ghostModeActive ? '👻 Modo Sigilo Activado' : (myLocation ? 'Compartiendo ubicación en tiempo real' : 'Obteniendo GPS...')}
+      {!isConnected && (
+        <div style={{ position: 'absolute', top: 76, left: '50%', transform: 'translateX(-50%)', background: 'rgba(220, 38, 38, 0.9)', color: 'white', padding: '8px 20px', borderRadius: '20px', fontSize: '14px', zIndex: 1100, display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {offlineQueue.length > 0 && <Clock size={14} color="#facc15" />}
+          <span>⚠️ Desconectado</span>
         </div>
-      </div>
+      )}
 
-      {/* Action Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-        <button className="glass-btn" style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)', border: 'none', padding: '16px', flexDirection: 'column', gap: '8px' }} onClick={() => sendAction('CHECK_IN')}>
-          <CheckCircle size={28} />
-          <span style={{ fontSize: '14px', fontWeight: 'bold' }}>Llegué Bien</span>
-        </button>
-
-        <button className="glass-btn" style={{ background: 'linear-gradient(135deg, #8b5cf6, #6d28d9)', border: 'none', padding: '16px', flexDirection: 'column', gap: '8px' }} onClick={() => setIsChatOpen(true)}>
-          <MessageSquare size={28} />
-          <span style={{ fontSize: '14px', fontWeight: 'bold' }}>Chat Táctico</span>
+      {/* Top Bar Overlay */}
+      <div className="top-bar">
+        <button className="icon-btn" onClick={() => setIsMenuOpen(true)}><Menu size={24} /></button>
+        <div className="top-bar-title">{userName} - Rastreable</div>
+        <button className="icon-btn" onClick={() => setIsChatOpen(true)}>
+          <MessageSquare size={24} />
         </button>
       </div>
 
-      {/* S.O.S Button */}
-      <button className="sos-btn" style={{ width: '100%', borderRadius: '24px', margin: 0, height: '80px', fontSize: '24px' }}
-        onMouseDown={handleSOSPressStart} onMouseUp={handleSOSPressEnd} onMouseLeave={handleSOSPressEnd}
-        onTouchStart={handleSOSPressStart} onTouchEnd={handleSOSPressEnd} onTouchMove={handleSOSPressEnd} onTouchCancel={handleSOSPressEnd}
-      >
-        <ShieldAlert size={28} style={{ marginRight: '12px', display: 'inline-block', verticalAlign: 'middle' }} />
-        S.O.S TÁCTICO
-      </button>
+      {/* Bottom Bar Overlay */}
+      <div className="bottom-bar">
+        <button className="bottom-action" onClick={() => myLocation && setMapCenterTarget(myLocation)}><Focus size={22} /><span>Centrar</span></button>
+        
+        {/* Llegué Bien Action */}
+        <button className="bottom-action" onClick={() => sendAction('CHECK_IN')}>
+          <CheckCircle size={22} color="#4ade80" />
+          <span style={{ color: '#4ade80' }}>Llegué Bien</span>
+        </button>
 
-      {/* Logout */}
-      <button className="glass-btn secondary" onClick={handleLogout} style={{ opacity: 0.6, marginTop: 'auto' }}>
-        <LogOut size={18} /> Salir
-      </button>
+        {/* SOS Button inside bottom-bar */}
+        <button className="bottom-action danger" 
+          onMouseDown={handleSOSPressStart} onMouseUp={handleSOSPressEnd} onMouseLeave={handleSOSPressEnd}
+          onTouchStart={handleSOSPressStart} onTouchEnd={handleSOSPressEnd} onTouchMove={handleSOSPressEnd} onTouchCancel={handleSOSPressEnd}
+        >
+          <ShieldAlert size={22} color="#fb7185" />
+          <span style={{ color: '#fb7185' }}>S.O.S (Mantener)</span>
+        </button>
+      </div>
+
+      {/* Side Menu Overlay */}
+      {isMenuOpen && <div className="side-menu-overlay" onClick={() => setIsMenuOpen(false)} />}
+      <div className={`side-menu ${isMenuOpen ? 'open' : ''}`}>
+        <div className="menu-header">
+          <h2 style={{ fontSize: '18px', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}><ShieldAlert size={20} color="#ec4899" />Radar Familiar</h2>
+          <button className="icon-btn" onClick={() => setIsMenuOpen(false)} style={{ marginRight: '-8px' }}><X size={24} /></button>
+        </div>
+
+        <div style={{ marginBottom: '32px' }}>
+          <p style={{ fontSize: '11px', opacity: 0.5, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>Estado del Sistema</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', marginBottom: '8px' }}>
+            <span style={{ width: 10, height: 10, borderRadius: '50%', background: isConnected ? '#4ade80' : '#facc15' }} />
+            <span style={{ fontSize: '14px', fontWeight: 'bold' }}>{isConnected ? 'En Línea (Protegido)' : 'Fuera de Línea'}</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', opacity: 0.7 }}>
+            <Smartphone size={20} />
+            <span style={{ fontSize: '14px' }}>Código: {masterServerId}</span>
+          </div>
+        </div>
+
+        <button className="menu-item" onClick={handleLogout} style={{ marginTop: 'auto', display: 'flex', gap: '12px', color: '#fb7185' }}>
+          <LogOut size={18} />
+          <span>Desvincular / Salir</span>
+        </button>
+      </div>
 
       {/* Chat Overlay */}
       <div style={{ position: 'absolute', top: isChatOpen ? 0 : '100%', left: 0, right: 0, bottom: 0, background: 'rgba(15, 23, 42, 0.95)', backdropFilter: 'blur(10px)', zIndex: 2000, transition: 'top 0.3s cubic-bezier(0.4, 0, 0.2, 1)', display: 'flex', flexDirection: 'column' }}>
@@ -579,29 +673,65 @@ export default function ClientDashboard() {
                 <div style={{ background: isMe ? '#4f46e5' : 'rgba(255,255,255,0.1)', padding: '12px', borderRadius: '16px', borderBottomRightRadius: isMe ? '4px' : '16px', borderBottomLeftRadius: isMe ? '16px' : '4px' }}>
                   {msg.type === 'TEXT' ? (
                     <span style={{ fontSize: '14px' }}>{msg.content}</span>
-                  ) : (
+                  ) : msg.type === 'AUDIO' ? (
                     <audio controls src={msg.content} style={{ height: '30px', maxWidth: '100%' }} />
+                  ) : (
+                    <img src={msg.content} alt="táctica" className="chat-image-preview" onClick={() => {
+                      const win = window.open();
+                      win?.document.write(`<body style="background:#000;display:flex;justify-content:center;align-items:center;margin:0;"><img src="${msg.content}" style="max-width:100%;max-height:100%;object-fit:contain;" /></body>`);
+                    }} />
                   )}
                 </div>
               </div>
             );
           })}
-          {messages.length === 0 && <p style={{ textAlign: 'center', opacity: 0.5, marginTop: '50px' }}>No hay mensajes. Usa el PTT para enviar un audio táctico.</p>}
+          {messages.length === 0 && <p style={{ textAlign: 'center', opacity: 0.5, marginTop: '50px' }}>No hay mensajes. Usa el PTT para enviar un audio táctico o fotos.</p>}
         </div>
 
-        {/* Input Area */}
+        {/* Input Area WhatsApp Style */}
         <div style={{ padding: '20px', background: 'rgba(255,255,255,0.05)', display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <input type="text" value={textInput} onChange={(e) => setTextInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSendText()} placeholder="Mensaje rápido..." style={{ flex: 1, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', padding: '12px 16px', borderRadius: '24px', color: 'white', outline: 'none' }} />
-          
-          {textInput.trim() ? (
-            <button onClick={handleSendText} style={{ background: '#4f46e5', border: 'none', color: 'white', width: '44px', height: '44px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Send size={18} /></button>
+          <input type="file" ref={fileInputRef} accept="image/*" style={{ display: 'none' }} onChange={handleImageSelect} />
+
+          {/* Si está grabando, oculta los botones de foto e input de texto */}
+          {isRecording ? (
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <button onClick={cancelRecording} style={{ background: 'none', border: 'none', color: '#ef4444', padding: '8px' }}>
+                <Trash size={20} />
+              </button>
+              <div style={{ flex: 1, color: '#4ade80', fontSize: '14px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>Grabando Audio Táctico...</span>
+                <div className="eq-container">
+                  <div className="eq-bar" />
+                  <div className="eq-bar" />
+                  <div className="eq-bar" />
+                  <div className="eq-bar" />
+                  <div className="eq-bar" />
+                </div>
+              </div>
+            </div>
           ) : (
+            <>
+              <button onClick={() => fileInputRef.current?.click()} style={{ background: 'none', border: 'none', color: '#ccc', padding: '8px' }} title="Enviar Foto">
+                <Camera size={22} />
+              </button>
+              <input type="text" value={textInput} onChange={(e) => setTextInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSendText()} placeholder="Mensaje rápido..." style={{ flex: 1, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', padding: '12px 16px', borderRadius: '24px', color: 'white', outline: 'none' }} />
+            </>
+          )}
+
+          {/* Botones de acción derecha (Mic / Enviar) */}
+          {!isRecording && !textInput.trim() ? (
             <button 
               onClick={toggleRecording} 
-              className={isRecording ? 'recording-pulse' : ''}
-              style={{ background: isRecording ? '#4ade80' : 'rgba(139,92,246,0.6)', border: 'none', color: 'white', width: '44px', height: '44px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.3s' }}
+              style={{ background: 'rgba(139,92,246,0.3)', border: 'none', color: '#a78bfa', width: '44px', height: '44px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
-              <Mic size={20} color={isRecording ? '#0f172a' : '#fff'} />
+              <Mic size={20} />
+            </button>
+          ) : (
+            <button 
+              onClick={isRecording ? toggleRecording : handleSendText} 
+              style={{ background: '#4ade80', border: 'none', color: '#0f172a', width: '44px', height: '44px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', animation: isRecording ? 'pulse-green 1s infinite' : 'none' }}
+            >
+              <Send size={18} />
             </button>
           )}
         </div>

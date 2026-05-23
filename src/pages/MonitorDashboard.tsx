@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useStore, type ChatMessage } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { QRCode } from 'react-qr-code';
-import { Menu, X, QrCode, LogOut, Focus, AlertCircle, ShieldAlert, Smartphone, BellOff, MessageSquare, Send, Mic, MapPin, Ghost, Bell } from 'lucide-react';
+import { Menu, X, QrCode, LogOut, Focus, AlertCircle, ShieldAlert, Smartphone, BellOff, MessageSquare, Send, Mic, MapPin, Ghost, Bell, Camera, Trash } from 'lucide-react';
 import Peer from 'peerjs';
 import { Geolocation } from '@capacitor/geolocation';
 
@@ -87,9 +87,12 @@ export default function MonitorDashboard() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [textInput, setTextInput] = useState('');
   const [isRecording, setIsRecording] = useState(false);
+  const [isProcessingMic, setIsProcessingMic] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const discardRecordingRef = useRef<boolean>(false);
 
   const showToast = (msg: string) => {
     const id = Date.now();
@@ -193,7 +196,16 @@ export default function MonitorDashboard() {
           showToast(`⚠️ ${data.name} canceló el SOS. Recomendamos rastreo en sigilo.`);
         }
 
-        if (data.type === 'CHECK_IN') showToast(`✅ ${data.name} reporta que llegó bien.`);
+        if (data.type === 'CHECK_IN') {
+          showToast(`✅ ${data.name} reporta que llegó bien.`);
+          if (data.lat !== undefined && data.lng !== undefined) {
+            setClients(prev => ({
+              ...prev,
+              [conn.peer]: { ...(prev[conn.peer] || { avatar: null }), name: data.name, lat: data.lat, lng: data.lng, lastSeen: now, isOnline: true }
+            }));
+            setMapCenterTarget([data.lat, data.lng]);
+          }
+        }
         if (data.type === 'PICK_ME_UP') showToast(`🚗 ${data.name} pide que lo vayas a buscar.`);
         if (data.type === 'CHAT_MSG') {
            addMessage(data.message);
@@ -316,18 +328,35 @@ export default function MonitorDashboard() {
     setTextInput('');
   };
 
-  const startRecording = async () => {
+  const toggleRecording = async () => {
+    if (isProcessingMic) return;
+
+    if (isRecording) {
+      if (mediaRecorderRef.current) mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      return;
+    }
+
+    setIsProcessingMic(true);
+    discardRecordingRef.current = false;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaRecorderRef.current = new MediaRecorder(stream);
       audioChunksRef.current = [];
       mediaRecorderRef.current.ondataavailable = (e) => audioChunksRef.current.push(e.data);
       mediaRecorderRef.current.onstop = () => {
+        if (discardRecordingRef.current) {
+          discardRecordingRef.current = false;
+          setIsProcessingMic(false);
+          stream.getTracks().forEach(track => track.stop());
+          return;
+        }
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         const reader = new FileReader();
         reader.readAsDataURL(audioBlob);
         reader.onloadend = () => {
           dispatchChatMessage({ id: Date.now().toString(), senderName: userName, type: 'AUDIO', content: reader.result as string, timestamp: Date.now() });
+          setIsProcessingMic(false);
         };
         stream.getTracks().forEach(track => track.stop());
       };
@@ -335,14 +364,62 @@ export default function MonitorDashboard() {
       setIsRecording(true);
     } catch (err) {
       showToast('Error al acceder al micrófono');
+      setIsProcessingMic(false);
     }
   };
 
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
+  const cancelRecording = () => {
+    discardRecordingRef.current = true;
+    if (mediaRecorderRef.current) {
       mediaRecorderRef.current.stop();
-      setIsRecording(false);
     }
+    setIsRecording(false);
+  };
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_SIZE = 400; // Táctico: ultra liviano
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_SIZE) {
+            height *= MAX_SIZE / width;
+            width = MAX_SIZE;
+          }
+        } else {
+          if (height > MAX_SIZE) {
+            width *= MAX_SIZE / height;
+            height = MAX_SIZE;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+
+        const compressedBase64 = canvas.toDataURL('image/jpeg', 0.5);
+
+        dispatchChatMessage({
+          id: Date.now().toString(),
+          senderName: userName,
+          type: 'IMAGE',
+          content: compressedBase64,
+          timestamp: Date.now()
+        });
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
   };
 
   useEffect(() => {
@@ -516,21 +593,67 @@ export default function MonitorDashboard() {
               <div key={msg.id} style={{ alignSelf: isMe ? 'flex-end' : 'flex-start', maxWidth: '80%' }}>
                 <div style={{ fontSize: '11px', opacity: 0.5, marginBottom: '4px', textAlign: isMe ? 'right' : 'left' }}>{msg.senderName} • {new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
                 <div style={{ background: isMe ? '#4f46e5' : 'rgba(255,255,255,0.1)', padding: '12px', borderRadius: '16px', borderBottomRightRadius: isMe ? '4px' : '16px', borderBottomLeftRadius: isMe ? '16px' : '4px' }}>
-                  {msg.type === 'TEXT' ? <span style={{ fontSize: '14px' }}>{msg.content}</span> : <audio controls src={msg.content} style={{ height: '30px', maxWidth: '100%' }} />}
+                  {msg.type === 'TEXT' ? (
+                    <span style={{ fontSize: '14px' }}>{msg.content}</span>
+                  ) : msg.type === 'AUDIO' ? (
+                    <audio controls src={msg.content} style={{ height: '30px', maxWidth: '100%' }} />
+                  ) : (
+                    <img src={msg.content} alt="táctica" className="chat-image-preview" onClick={() => {
+                      const win = window.open();
+                      win?.document.write(`<body style="background:#000;display:flex;justify-content:center;align-items:center;margin:0;"><img src="${msg.content}" style="max-width:100%;max-height:100%;object-fit:contain;" /></body>`);
+                    }} />
+                  )}
                 </div>
               </div>
             );
           })}
-          {messages.length === 0 && <p style={{ textAlign: 'center', opacity: 0.5, marginTop: '50px' }}>No hay mensajes. Usa el PTT para enviar un audio táctico.</p>}
+          {messages.length === 0 && <p style={{ textAlign: 'center', opacity: 0.5, marginTop: '50px' }}>No hay mensajes. Usa el PTT para enviar un audio táctico o fotos.</p>}
         </div>
 
+        {/* Input Area WhatsApp Style */}
         <div style={{ padding: '20px', background: 'rgba(255,255,255,0.05)', display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <input type="text" value={textInput} onChange={(e) => setTextInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSendText()} placeholder="Mensaje rápido..." style={{ flex: 1, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', padding: '12px 16px', borderRadius: '24px', color: 'white', outline: 'none' }} />
-          {textInput.trim() ? (
-            <button onClick={handleSendText} style={{ background: '#4f46e5', border: 'none', color: 'white', width: '44px', height: '44px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Send size={18} /></button>
+          <input type="file" ref={fileInputRef} accept="image/*" style={{ display: 'none' }} onChange={handleImageSelect} />
+
+          {/* Si está grabando, oculta los botones de foto e input de texto */}
+          {isRecording ? (
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <button onClick={cancelRecording} style={{ background: 'none', border: 'none', color: '#ef4444', padding: '8px' }}>
+                <Trash size={20} />
+              </button>
+              <div style={{ flex: 1, color: '#4ade80', fontSize: '14px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>Grabando Audio Táctico...</span>
+                <div className="eq-container">
+                  <div className="eq-bar" />
+                  <div className="eq-bar" />
+                  <div className="eq-bar" />
+                  <div className="eq-bar" />
+                  <div className="eq-bar" />
+                </div>
+              </div>
+            </div>
           ) : (
-            <button onMouseDown={startRecording} onMouseUp={stopRecording} onMouseLeave={stopRecording} onTouchStart={startRecording} onTouchEnd={stopRecording} onTouchMove={stopRecording} onTouchCancel={stopRecording} style={{ background: isRecording ? '#ef4444' : '#8b5cf6', border: 'none', color: 'white', width: '44px', height: '44px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s', animation: isRecording ? 'pulse 1s infinite' : 'none' }}>
+            <>
+              <button onClick={() => fileInputRef.current?.click()} style={{ background: 'none', border: 'none', color: '#ccc', padding: '8px' }} title="Enviar Foto">
+                <Camera size={22} />
+              </button>
+              <input type="text" value={textInput} onChange={(e) => setTextInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSendText()} placeholder="Mensaje rápido..." style={{ flex: 1, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', padding: '12px 16px', borderRadius: '24px', color: 'white', outline: 'none' }} />
+            </>
+          )}
+
+          {/* Botones de acción derecha (Mic / Enviar) */}
+          {!isRecording && !textInput.trim() ? (
+            <button 
+              onClick={toggleRecording} 
+              style={{ background: 'rgba(139,92,246,0.3)', border: 'none', color: '#a78bfa', width: '44px', height: '44px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
               <Mic size={20} />
+            </button>
+          ) : (
+            <button 
+              onClick={isRecording ? toggleRecording : handleSendText} 
+              style={{ background: '#4ade80', border: 'none', color: '#0f172a', width: '44px', height: '44px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', animation: isRecording ? 'pulse-green 1s infinite' : 'none' }}
+            >
+              <Send size={18} />
             </button>
           )}
         </div>

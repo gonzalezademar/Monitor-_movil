@@ -4,8 +4,8 @@ import { persist } from 'zustand/middleware';
 export interface ChatMessage {
   id: string;
   senderName: string;
-  type: 'TEXT' | 'AUDIO';
-  content: string; // text or base64 audio
+  type: 'TEXT' | 'AUDIO' | 'IMAGE';
+  content: string; // text, base64 audio, or base64 image
   timestamp: number;
 }
 
@@ -69,7 +69,10 @@ export const useStore = create<AppState>()(
       name: 'radar-storage',
       partialize: (state) => ({
         ...state,
-        messages: state.messages.map(m => m.type === 'AUDIO' ? { ...m, type: 'TEXT', content: '[Audio caducado por ahorro de memoria]' } : m)
+        messages: state.messages.map(m => 
+          m.type === 'AUDIO' ? { ...m, type: 'TEXT', content: '[Audio caducado por ahorro de memoria]' } :
+          m.type === 'IMAGE' ? { ...m, type: 'TEXT', content: '[Imagen caducada por ahorro de memoria]' } : m
+        )
       })
     }
   )
