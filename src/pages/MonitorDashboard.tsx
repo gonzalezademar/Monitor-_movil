@@ -2,10 +2,10 @@ import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-le
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { useState, useEffect, useRef } from 'react';
-import { useStore } from '../store/useStore';
+import { useStore, type ChatMessage } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { QRCode } from 'react-qr-code';
-import { Menu, X, QrCode, LogOut, Focus, AlertCircle, ShieldAlert, Smartphone, BellOff } from 'lucide-react';
+import { Menu, X, QrCode, LogOut, Focus, AlertCircle, ShieldAlert, Smartphone, BellOff, MessageSquare, Send, Mic } from 'lucide-react';
 import Peer from 'peerjs';
 import { Geolocation } from '@capacitor/geolocation';
 
@@ -30,7 +30,6 @@ function MapAutoCenter({ target }: { target: [number, number] | null }) {
   return null;
 }
 
-// Haversine formula to calculate distance in meters
 function getDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
   const R = 6371e3; 
   const p1 = lat1 * Math.PI/180;
@@ -47,10 +46,9 @@ export default function MonitorDashboard() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   
-  const { logout, masterServerId, fenceRadius, setFenceRadius, userName } = useStore();
+  const { logout, masterServerId, fenceRadius, setFenceRadius, userName, messages, addMessage } = useStore();
   const navigate = useNavigate();
   const [localRadius, setLocalRadius] = useState(fenceRadius);
-
   const [myLocation, setMyLocation] = useState<[number, number] | null>(null);
 
   const [clients, setClients] = useState<Record<string, { lat: number; lng: number; name: string, lastSeen: number, isOnline: boolean }>>({});
@@ -64,14 +62,20 @@ export default function MonitorDashboard() {
   const [toasts, setToasts] = useState<{id: number, msg: string}[]>([]);
   const [remoteSOSActive, setRemoteSOSActive] = useState(false);
 
-  // Helper to show toasts
+  // Chat UI
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [textInput, setTextInput] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+
   const showToast = (msg: string) => {
     const id = Date.now();
     setToasts(prev => [...prev, { id, msg }]);
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 6000);
   };
 
-  // Monitor's own GPS
   useEffect(() => {
     let watchId: string | null = null;
     Geolocation.requestPermissions().then(perm => {
@@ -92,6 +96,15 @@ export default function MonitorDashboard() {
     peerRef.current = peer;
 
     peer.on('connection', (conn) => {
+      
+      conn.on('open', () => {
+         const currentQueue = useStore.getState().offlineQueue;
+         if (currentQueue.length > 0) {
+            currentQueue.forEach(action => conn.send(action));
+            useStore.getState().clearOfflineQueue();
+         }
+      });
+
       conn.on('data', (data: any) => {
         const now = Date.now();
         
@@ -105,17 +118,13 @@ export default function MonitorDashboard() {
         if (data.type === 'LOCATION') {
           setClients((prev) => {
             if (Object.keys(prev).length === 0) setMapCenterTarget([data.lat, data.lng]);
-            return {
-              ...prev,
-              [conn.peer]: { lat: data.lat, lng: data.lng, name: data.name, lastSeen: now, isOnline: true }
-            };
+            return { ...prev, [conn.peer]: { lat: data.lat, lng: data.lng, name: data.name, lastSeen: now, isOnline: true } };
           });
 
-          // Check Geofence
           if (myLocation) {
             const dist = getDistance(myLocation[0], myLocation[1], data.lat, data.lng);
             if (dist > localRadius) {
-              showToast(`⚠️ ${data.name} está fuera de la zona segura (${Math.round(dist)}m)`);
+              showToast(`⚠️ ${data.name} salió de la zona segura (${Math.round(dist)}m)`);
             }
           }
         }
@@ -125,12 +134,11 @@ export default function MonitorDashboard() {
           playSiren();
         }
 
-        if (data.type === 'CHECK_IN') {
-          showToast(`✅ ${data.name} reporta que llegó bien.`);
-        }
-
-        if (data.type === 'PICK_ME_UP') {
-          showToast(`🚗 ${data.name} pide que lo vayas a buscar.`);
+        if (data.type === 'CHECK_IN') showToast(`✅ ${data.name} reporta que llegó bien.`);
+        if (data.type === 'PICK_ME_UP') showToast(`🚗 ${data.name} pide que lo vayas a buscar.`);
+        if (data.type === 'CHAT_MSG') {
+           addMessage(data.message);
+           showToast(`💬 Mensaje de ${data.message.senderName}`);
         }
       });
     });
@@ -139,9 +147,8 @@ export default function MonitorDashboard() {
       peer.destroy();
       stopSiren();
     };
-  }, [masterServerId, myLocation, localRadius]);
+  }, [masterServerId, myLocation, localRadius, addMessage]);
 
-  // Heartbeat Checker Loop
   useEffect(() => {
     const interval = setInterval(() => {
        const now = Date.now();
@@ -162,9 +169,7 @@ export default function MonitorDashboard() {
   }, []);
 
   const playSiren = () => {
-    if (!audioCtxRef.current) {
-      audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-    }
+    if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
     const ctx = audioCtxRef.current;
     if (ctx.state === 'suspended') ctx.resume();
 
@@ -199,23 +204,70 @@ export default function MonitorDashboard() {
     setAlarmActive({ active: false, originName: '' });
   };
 
+  const broadcastAction = (action: any) => {
+     const peer = peerRef.current;
+     if (peer) {
+       for (const peerId in peer.connections) {
+         (peer.connections as any)[peerId].forEach((conn: any) => {
+            if (conn.open) conn.send(action);
+         });
+       }
+     }
+  }
+
   const toggleRemoteSOS = () => {
-    const peer = peerRef.current;
-    if (peer) {
-      const newState = !remoteSOSActive;
-      for (const peerId in peer.connections) {
-        (peer.connections as any)[peerId].forEach((conn: any) => {
-           conn.send({ type: newState ? 'REMOTE_SOS' : 'STOP_REMOTE_SOS' });
-        });
-      }
-      setRemoteSOSActive(newState);
-      if (newState) {
-         showToast("🚨 Alarma remota activada en dispositivos hijos");
-      } else {
-         showToast("✅ Alarma remota apagada");
-      }
+    const newState = !remoteSOSActive;
+    broadcastAction({ type: newState ? 'REMOTE_SOS' : 'STOP_REMOTE_SOS' });
+    setRemoteSOSActive(newState);
+    if (newState) showToast("🚨 Alarma remota activada en dispositivos hijos");
+    else showToast("✅ Alarma remota apagada");
+  };
+
+  const dispatchChatMessage = (msg: ChatMessage) => {
+    addMessage(msg);
+    broadcastAction({ type: 'CHAT_MSG', message: msg });
+  };
+
+  const handleSendText = () => {
+    if (!textInput.trim()) return;
+    dispatchChatMessage({ id: Date.now().toString(), senderName: userName, type: 'TEXT', content: textInput.trim(), timestamp: Date.now() });
+    setTextInput('');
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorderRef.current = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      mediaRecorderRef.current.ondataavailable = (e) => audioChunksRef.current.push(e.data);
+      mediaRecorderRef.current.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const reader = new FileReader();
+        reader.readAsDataURL(audioBlob);
+        reader.onloadend = () => {
+          dispatchChatMessage({ id: Date.now().toString(), senderName: userName, type: 'AUDIO', content: reader.result as string, timestamp: Date.now() });
+        };
+        stream.getTracks().forEach(track => track.stop());
+      };
+      mediaRecorderRef.current.start();
+      setIsRecording(true);
+    } catch (err) {
+      showToast('Error al acceder al micrófono');
     }
   };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isChatOpen && chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [messages, isChatOpen]);
 
   useEffect(() => {
     const handleOnline  = () => setIsOnline(true);
@@ -228,101 +280,61 @@ export default function MonitorDashboard() {
     };
   }, []);
 
-  const handleLogout = () => {
-    logout();
-    navigate('/');
-  };
-
   const handleCenterMap = () => {
     const firstClient = Object.values(clients).find(c => c.isOnline);
-    if (firstClient) {
-      setMapCenterTarget([firstClient.lat, firstClient.lng]);
-    } else if (myLocation) {
-      setMapCenterTarget(myLocation);
-    }
+    if (firstClient) setMapCenterTarget([firstClient.lat, firstClient.lng]);
+    else if (myLocation) setMapCenterTarget(myLocation);
   };
 
   return (
-    <div className="dashboard-container">
-      <MapContainer center={myLocation || [-34.6037, -58.3816]} zoom={13} style={{ height: '100dvh', width: '100vw' }}>
+    <div className="dashboard-container" style={{ position: 'relative', overflow: 'hidden' }}>
+      <MapContainer center={myLocation || [-34.6037, -58.3816]} zoom={13} style={{ height: '100dvh', width: '100vw' }} zoomControl={false}>
         <MapAutoCenter target={mapCenterTarget} />
         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-        
-        {/* Padre (Real GPS) */}
         {myLocation && (
           <>
-            <Marker position={myLocation}>
-              <Popup>Tú (Monitor)</Popup>
-            </Marker>
+            <Marker position={myLocation}><Popup>Tú (Monitor)</Popup></Marker>
             <Circle center={myLocation} radius={localRadius} pathOptions={{ color: '#4f46e5', fillOpacity: 0.1, weight: 2, dashArray: "5, 5" }} />
           </>
         )}
-
-        {/* Hijos */}
         {Object.entries(clients).map(([id, client]) => {
-          if (client.lat === 0 && client.lng === 0) return null; // Wait until we have a real location
+          if (client.lat === 0 && client.lng === 0) return null;
           return (
             <Marker key={id} position={[client.lat, client.lng]} opacity={client.isOnline ? 1 : 0.5}>
-              <Popup>
-                <strong>{client.name}</strong> <br/>
-                {client.isOnline ? 'GPS en tiempo real' : 'Última ubicación conocida'}
-              </Popup>
+              <Popup><strong>{client.name}</strong> <br/>{client.isOnline ? 'GPS en tiempo real' : 'Última ubicación conocida'}</Popup>
             </Marker>
           );
         })}
       </MapContainer>
 
-      {/* TOASTS NOTIFICATIONS */}
+      {/* TOASTS */}
       <div style={{ position: 'absolute', top: 80, left: 20, right: 20, zIndex: 1100, display: 'flex', flexDirection: 'column', gap: '8px' }}>
          {toasts.map(t => (
-           <div key={t.id} style={{ background: 'rgba(0,0,0,0.8)', color: 'white', padding: '12px 16px', borderRadius: '8px', fontSize: '14px', backdropFilter: 'blur(4px)', animation: 'slideDown 0.3s ease-out', display: 'flex', alignItems: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }}>
-              {t.msg}
-           </div>
+           <div key={t.id} style={{ background: 'rgba(0,0,0,0.8)', color: 'white', padding: '12px 16px', borderRadius: '8px', fontSize: '14px', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center' }}>{t.msg}</div>
          ))}
       </div>
 
       {alarmActive.active && (
-        <div style={{
-          position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-          background: 'rgba(220, 38, 38, 0.9)', zIndex: 9999, display: 'flex',
-          flexDirection: 'column', justifyContent: 'center', alignItems: 'center', color: 'white'
-        }}>
-          <AlertCircle size={80} color="white" style={{ marginBottom: 20, animation: 'dotPulse 1s infinite' }} />
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(220, 38, 38, 0.9)', zIndex: 9999, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', color: 'white' }}>
+          <AlertCircle size={80} style={{ marginBottom: 20, animation: 'dotPulse 1s infinite' }} />
           <h1 style={{ fontSize: '32px', textAlign: 'center', margin: '0 20px' }}>¡EMERGENCIA S.O.S!</h1>
           <p style={{ fontSize: '20px', marginTop: '10px' }}>{alarmActive.originName} pide ayuda</p>
-          <button onClick={stopSiren} style={{ marginTop: '40px', padding: '16px 32px', background: 'white', color: '#dc2626', fontSize: '18px', fontWeight: 'bold', border: 'none', borderRadius: '30px', cursor: 'pointer', display: 'flex', gap: '10px', alignItems: 'center' }}>
-            <BellOff size={24} /> Entendido, apagar sirena
-          </button>
+          <button onClick={stopSiren} style={{ marginTop: '40px', padding: '16px 32px', background: 'white', color: '#dc2626', fontSize: '18px', fontWeight: 'bold', border: 'none', borderRadius: '30px', display: 'flex', gap: '10px', alignItems: 'center' }}><BellOff size={24} /> Entendido, apagar sirena</button>
         </div>
       )}
 
       {!isOnline && (
-        <div style={{
-          position: 'absolute', top: 76, left: '50%', transform: 'translateX(-50%)',
-          background: 'rgba(220, 38, 38, 0.9)', color: 'white',
-          padding: '8px 20px', borderRadius: '20px', fontSize: '14px',
-          zIndex: 1100, backdropFilter: 'blur(4px)', whiteSpace: 'nowrap',
-          boxShadow: '0 2px 12px rgba(0,0,0,0.3)'
-        }}>
-          ⚠️ Sin conexión — el mapa no puede cargar
-        </div>
+        <div style={{ position: 'absolute', top: 76, left: '50%', transform: 'translateX(-50%)', background: 'rgba(220, 38, 38, 0.9)', color: 'white', padding: '8px 20px', borderRadius: '20px', fontSize: '14px', zIndex: 1100 }}>⚠️ Sin conexión</div>
       )}
 
       <div className="top-bar">
-        <button className="icon-btn" onClick={() => setIsMenuOpen(true)}>
-          <Menu size={24} />
-        </button>
-        <div className="top-bar-title">
-          {userName} - Monitor
-        </div>
-        <div style={{ width: 40 }}></div>
+        <button className="icon-btn" onClick={() => setIsMenuOpen(true)}><Menu size={24} /></button>
+        <div className="top-bar-title">{userName} - Monitor</div>
+        <button className="icon-btn" onClick={() => setIsChatOpen(true)}><MessageSquare size={24} /></button>
       </div>
 
       <div className="bottom-bar">
-        <button className="bottom-action" onClick={handleCenterMap}>
-          <Focus size={22} />
-          <span>Centrar</span>
-        </button>
+        <button className="bottom-action" onClick={handleCenterMap}><Focus size={22} /><span>Centrar</span></button>
         <button className={`bottom-action ${remoteSOSActive ? 'danger-active' : 'danger'}`} onClick={toggleRemoteSOS}>
           <AlertCircle size={22} color={remoteSOSActive ? '#fff' : '#dc2626'} />
           <span style={{ color: remoteSOSActive ? '#fff' : 'inherit' }}>{remoteSOSActive ? 'Apagar Remoto' : 'SOS Remoto'}</span>
@@ -332,15 +344,10 @@ export default function MonitorDashboard() {
       {isMenuOpen && <div className="side-menu-overlay" onClick={() => setIsMenuOpen(false)} />}
       <div className={`side-menu ${isMenuOpen ? 'open' : ''}`}>
         <div className="menu-header">
-          <h2 style={{ fontSize: '18px', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <ShieldAlert size={20} color="#ec4899" />
-            Radar Familiar
-          </h2>
-          <button className="icon-btn" onClick={() => setIsMenuOpen(false)} style={{ marginRight: '-8px' }}>
-            <X size={24} />
-          </button>
+          <h2 style={{ fontSize: '18px', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}><ShieldAlert size={20} color="#ec4899" />Radar Familiar</h2>
+          <button className="icon-btn" onClick={() => setIsMenuOpen(false)} style={{ marginRight: '-8px' }}><X size={24} /></button>
         </div>
-
+        
         <div style={{ marginBottom: '32px' }}>
           <p style={{ fontSize: '11px', opacity: 0.5, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>Dispositivos</p>
           {Object.values(clients).length === 0 ? (
@@ -384,15 +391,45 @@ export default function MonitorDashboard() {
               onTouchEnd={(e) => setFenceRadius(Number((e.target as HTMLInputElement).value))}
               style={{ width: '100%', accentColor: '#4f46e5' }}
             />
-            <p style={{ fontSize: '11px', opacity: 0.6, marginTop: '10px' }}>Centrado en la ubicación del Monitor.</p>
           </div>
         </div>
 
-        <div style={{ marginTop: 'auto' }}>
-          <button className="menu-item" onClick={handleLogout} style={{ color: '#fca5a5' }}>
-            <LogOut size={18} />
-            Cerrar sesión
-          </button>
+        <div style={{ marginTop: 'auto' }}><button className="menu-item" onClick={() => { logout(); navigate('/'); }} style={{ color: '#fca5a5' }}><LogOut size={18} />Cerrar sesión</button></div>
+      </div>
+
+      {/* Chat Overlay */}
+      <div style={{ position: 'absolute', top: isChatOpen ? 0 : '100%', left: 0, right: 0, bottom: 0, background: 'rgba(15, 23, 42, 0.95)', backdropFilter: 'blur(10px)', zIndex: 2000, transition: 'top 0.3s cubic-bezier(0.4, 0, 0.2, 1)', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', alignItems: 'center', padding: '20px', background: 'rgba(255,255,255,0.05)' }}>
+          <h2 style={{ margin: 0, fontSize: '18px', display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+            <MessageSquare size={20} color="#8b5cf6" /> Chat Familiar P2P
+          </h2>
+          <button onClick={() => setIsChatOpen(false)} style={{ background: 'none', border: 'none', color: '#ccc' }}><X size={24} /></button>
+        </div>
+
+        <div ref={chatScrollRef} style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {messages.map((msg) => {
+            const isMe = msg.senderName === userName;
+            return (
+              <div key={msg.id} style={{ alignSelf: isMe ? 'flex-end' : 'flex-start', maxWidth: '80%' }}>
+                <div style={{ fontSize: '11px', opacity: 0.5, marginBottom: '4px', textAlign: isMe ? 'right' : 'left' }}>{msg.senderName} • {new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                <div style={{ background: isMe ? '#4f46e5' : 'rgba(255,255,255,0.1)', padding: '12px', borderRadius: '16px', borderBottomRightRadius: isMe ? '4px' : '16px', borderBottomLeftRadius: isMe ? '16px' : '4px' }}>
+                  {msg.type === 'TEXT' ? <span style={{ fontSize: '14px' }}>{msg.content}</span> : <audio controls src={msg.content} style={{ height: '30px', maxWidth: '100%' }} />}
+                </div>
+              </div>
+            );
+          })}
+          {messages.length === 0 && <p style={{ textAlign: 'center', opacity: 0.5, marginTop: '50px' }}>No hay mensajes. Usa el PTT para enviar un audio táctico.</p>}
+        </div>
+
+        <div style={{ padding: '20px', background: 'rgba(255,255,255,0.05)', display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <input type="text" value={textInput} onChange={(e) => setTextInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSendText()} placeholder="Mensaje rápido..." style={{ flex: 1, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', padding: '12px 16px', borderRadius: '24px', color: 'white', outline: 'none' }} />
+          {textInput.trim() ? (
+            <button onClick={handleSendText} style={{ background: '#4f46e5', border: 'none', color: 'white', width: '44px', height: '44px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Send size={18} /></button>
+          ) : (
+            <button onMouseDown={startRecording} onMouseUp={stopRecording} onMouseLeave={stopRecording} onTouchStart={startRecording} onTouchEnd={stopRecording} onTouchMove={stopRecording} onTouchCancel={stopRecording} style={{ background: isRecording ? '#ef4444' : '#8b5cf6', border: 'none', color: 'white', width: '44px', height: '44px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s', animation: isRecording ? 'pulse 1s infinite' : 'none' }}>
+              <Mic size={20} />
+            </button>
+          )}
         </div>
       </div>
     </div>

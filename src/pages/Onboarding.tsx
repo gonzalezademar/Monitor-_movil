@@ -205,9 +205,12 @@ export default function Onboarding() {
         )}
       </div>
       
-      <p style={{ fontSize: '11px', opacity: 0.4, marginTop: '20px', textAlign: 'center', letterSpacing: '0.5px' }}>
-        Desarrollado por Adelio González
-      </p>
+      <div style={{ marginTop: '24px', textAlign: 'center' }}>
+        <p style={{ fontSize: '12px', fontWeight: 'bold', color: 'rgba(255,255,255,0.9)', letterSpacing: '0.5px', margin: 0, textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>
+          🚀 Desarrollado por <span style={{ color: '#ec4899' }}>Adelio Gonzalez</span>
+        </p>
+        <p style={{ fontSize: '10px', opacity: 0.6, margin: '4px 0 0' }}>Seguridad Táctica P2P 🛡️</p>
+      </div>
     </div>
   );
 }

@@ -1,11 +1,11 @@
-import { useStore } from '../store/useStore';
+import { useStore, type ChatMessage } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { useRef, useEffect, useState } from 'react';
 import Peer from 'peerjs';
 import { Geolocation } from '@capacitor/geolocation';
 import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { ShieldAlert, Bell, MessageSquare, LogOut, CheckCircle } from 'lucide-react';
+import { ShieldAlert, Bell, MessageSquare, LogOut, CheckCircle, Mic, Send, X, Clock } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
@@ -30,7 +30,7 @@ function MapAutoCenter({ target }: { target: [number, number] | null }) {
 }
 
 export default function ClientDashboard() {
-  const { isSOSActive, setSOSActive, logout, userName, masterServerId, setMyPeerId } = useStore();
+  const { isSOSActive, setSOSActive, logout, userName, masterServerId, setMyPeerId, messages, addMessage, offlineQueue, enqueueOfflineAction } = useStore();
   const navigate = useNavigate();
 
   const sosTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -46,16 +46,33 @@ export default function ClientDashboard() {
   const oscillatorRef = useRef<OscillatorNode | null>(null);
   const [isRemoteAlarmActive, setIsRemoteAlarmActive] = useState(false);
 
+  // Chat State
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [textInput, setTextInput] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     return () => {
       if (sosTimerRef.current) clearTimeout(sosTimerRef.current);
       if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
       if (peerRef.current) peerRef.current.destroy();
       stopRemoteAlarm();
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
     };
   }, []);
 
-  // Audio Synth for Remote SOS
+  // Auto-scroll chat
+  useEffect(() => {
+    if (isChatOpen && chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [messages, isChatOpen]);
+
   const playRemoteAlarm = () => {
     if (!audioCtxRef.current) {
       audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -110,7 +127,14 @@ export default function ClientDashboard() {
       
       conn.on('open', () => {
         setIsConnected(true);
-        // Start Heartbeat
+        
+        // Flush Offline Queue
+        const currentQueue = useStore.getState().offlineQueue;
+        if (currentQueue.length > 0) {
+           currentQueue.forEach(action => conn.send(action));
+           useStore.getState().clearOfflineQueue();
+        }
+
         setInterval(() => {
           if (connRef.current && connRef.current.open) {
             connRef.current.send({ type: 'HEARTBEAT', name: userName });
@@ -119,11 +143,10 @@ export default function ClientDashboard() {
       });
 
       conn.on('data', (data: any) => {
-        if (data.type === 'REMOTE_SOS') {
-          playRemoteAlarm();
-        }
-        if (data.type === 'STOP_REMOTE_SOS') {
-          stopRemoteAlarm();
+        if (data.type === 'REMOTE_SOS') playRemoteAlarm();
+        if (data.type === 'STOP_REMOTE_SOS') stopRemoteAlarm();
+        if (data.type === 'CHAT_MSG') {
+           addMessage(data.message);
         }
       });
       
@@ -134,7 +157,7 @@ export default function ClientDashboard() {
     return () => {
       peer.destroy();
     };
-  }, [masterServerId, setMyPeerId, userName]);
+  }, [masterServerId, setMyPeerId, userName, addMessage]);
 
   // Geolocation
   useEffect(() => {
@@ -143,10 +166,7 @@ export default function ClientDashboard() {
     const startTracking = async () => {
       try {
         const perm = await Geolocation.requestPermissions();
-        if (perm.location !== 'granted') {
-          console.error('Permiso de ubicación denegado');
-          return;
-        }
+        if (perm.location !== 'granted') return;
 
         watchId = await Geolocation.watchPosition(
           { enableHighAccuracy: true, timeout: 10000 },
@@ -172,32 +192,95 @@ export default function ClientDashboard() {
     startTracking();
     
     return () => {
-      if (watchId) {
-        Geolocation.clearWatch({ id: watchId });
-      }
+      if (watchId) Geolocation.clearWatch({ id: watchId });
     };
   }, [userName]);
 
   // SOS status
   useEffect(() => {
     if (isSOSActive && connRef.current && connRef.current.open) {
-      connRef.current.send({
-         type: 'SOS_ALERT',
-         name: userName || 'Cliente'
-      });
+      connRef.current.send({ type: 'SOS_ALERT', name: userName || 'Cliente' });
+    } else if (isSOSActive && (!connRef.current || !connRef.current.open)) {
+      enqueueOfflineAction({ type: 'SOS_ALERT', name: userName || 'Cliente' });
     }
-  }, [isSOSActive, userName]);
+  }, [isSOSActive, userName, enqueueOfflineAction]);
 
   const sendAction = (type: string) => {
+    const action = { type, name: userName };
     if (connRef.current && connRef.current.open) {
-      connRef.current.send({ type, name: userName });
+      connRef.current.send(action);
+    } else {
+      enqueueOfflineAction(action);
+    }
+  };
+
+  const dispatchChatMessage = (msg: ChatMessage) => {
+    addMessage(msg);
+    const action = { type: 'CHAT_MSG', message: msg };
+    if (connRef.current && connRef.current.open) {
+      connRef.current.send(action);
+    } else {
+      enqueueOfflineAction(action);
+    }
+  };
+
+  const handleSendText = () => {
+    if (!textInput.trim()) return;
+    const msg: ChatMessage = {
+      id: Date.now().toString(),
+      senderName: userName,
+      type: 'TEXT',
+      content: textInput.trim(),
+      timestamp: Date.now()
+    };
+    dispatchChatMessage(msg);
+    setTextInput('');
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorderRef.current = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      
+      mediaRecorderRef.current.ondataavailable = (e) => {
+        audioChunksRef.current.push(e.data);
+      };
+
+      mediaRecorderRef.current.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const reader = new FileReader();
+        reader.readAsDataURL(audioBlob);
+        reader.onloadend = () => {
+          const base64Audio = reader.result as string;
+          const msg: ChatMessage = {
+            id: Date.now().toString(),
+            senderName: userName,
+            type: 'AUDIO',
+            content: base64Audio,
+            timestamp: Date.now()
+          };
+          dispatchChatMessage(msg);
+        };
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorderRef.current.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error('Error al acceder al micrófono', err);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
     }
   };
 
   const handleSOSPressStart = () => {
-    sosTimerRef.current = setTimeout(() => {
-      setSOSActive(true);
-    }, 2000);
+    sosTimerRef.current = setTimeout(() => setSOSActive(true), 2000);
   };
 
   const handleSOSPressEnd = () => {
@@ -214,9 +297,7 @@ export default function ClientDashboard() {
       tapCountRef.current = 0;
       setSOSActive(false);
     } else {
-      tapTimerRef.current = setTimeout(() => {
-        tapCountRef.current = 0;
-      }, 3000);
+      tapTimerRef.current = setTimeout(() => tapCountRef.current = 0, 3000);
     }
   };
 
@@ -226,17 +307,11 @@ export default function ClientDashboard() {
   };
 
   if (isSOSActive) {
-    return (
-      <div
-        className="blackout-screen"
-        onClick={handleBlackoutTap}
-        style={{ userSelect: 'none', cursor: 'default' }}
-      />
-    );
+    return <div className="blackout-screen" onClick={handleBlackoutTap} style={{ userSelect: 'none', cursor: 'default' }} />;
   }
 
   return (
-    <div className="client-container" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px', height: '100dvh' }}>
+    <div className="client-container" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px', height: '100dvh', position: 'relative', overflow: 'hidden' }}>
       
       {/* Header Info */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.05)', padding: '12px 20px', borderRadius: '16px' }}>
@@ -245,9 +320,10 @@ export default function ClientDashboard() {
           <strong style={{ fontSize: '18px' }}>{userName}</strong>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0,0,0,0.2)', padding: '6px 12px', borderRadius: '20px' }}>
-          <span style={{ width: 10, height: 10, borderRadius: '50%', background: isConnected ? '#4ade80' : '#facc15' }} />
+          {!isConnected && offlineQueue.length > 0 && <Clock size={14} color="#facc15" />}
+          <span style={{ width: 10, height: 10, borderRadius: '50%', background: isConnected ? '#4ade80' : '#facc15', animation: !isConnected ? 'pulse 1s infinite' : 'none' }} />
           <span style={{ fontSize: '12px', fontWeight: 'bold', color: isConnected ? '#4ade80' : '#facc15' }}>
-            {isConnected ? 'Protegido' : 'Buscando red'}
+            {isConnected ? 'Protegido' : 'Desconectado'}
           </span>
         </div>
       </div>
@@ -265,9 +341,7 @@ export default function ClientDashboard() {
         <MapContainer center={myLocation || [-34.6037, -58.3816]} zoom={15} style={{ height: '100%', width: '100%' }} zoomControl={false} dragging={false}>
           <MapAutoCenter target={myLocation} />
           <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
-          {myLocation && (
-            <Marker position={myLocation} />
-          )}
+          {myLocation && <Marker position={myLocation} />}
         </MapContainer>
         <div style={{ position: 'absolute', bottom: 10, left: 10, right: 10, zIndex: 1000, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(10px)', padding: '8px 12px', borderRadius: '12px', textAlign: 'center', fontSize: '12px', color: '#ccc' }}>
           {myLocation ? 'Compartiendo ubicación en tiempo real' : 'Obteniendo GPS...'}
@@ -276,47 +350,81 @@ export default function ClientDashboard() {
 
       {/* Action Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-        <button 
-          className="glass-btn" 
-          style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)', border: 'none', padding: '16px', flexDirection: 'column', gap: '8px' }}
-          onClick={() => sendAction('CHECK_IN')}
-        >
+        <button className="glass-btn" style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)', border: 'none', padding: '16px', flexDirection: 'column', gap: '8px' }} onClick={() => sendAction('CHECK_IN')}>
           <CheckCircle size={28} />
           <span style={{ fontSize: '14px', fontWeight: 'bold' }}>Llegué Bien</span>
         </button>
 
-        <button 
-          className="glass-btn" 
-          style={{ background: 'linear-gradient(135deg, #2563eb, #1d4ed8)', border: 'none', padding: '16px', flexDirection: 'column', gap: '8px' }}
-          onClick={() => sendAction('PICK_ME_UP')}
-        >
+        <button className="glass-btn" style={{ background: 'linear-gradient(135deg, #8b5cf6, #6d28d9)', border: 'none', padding: '16px', flexDirection: 'column', gap: '8px' }} onClick={() => setIsChatOpen(true)}>
           <MessageSquare size={28} />
-          <span style={{ fontSize: '14px', fontWeight: 'bold' }}>Ven a buscarme</span>
+          <span style={{ fontSize: '14px', fontWeight: 'bold' }}>Chat Táctico</span>
         </button>
       </div>
 
       {/* S.O.S Button */}
-      <button
-        className="sos-btn"
-        style={{ width: '100%', borderRadius: '24px', margin: 0, height: '80px', fontSize: '24px' }}
-        onMouseDown={handleSOSPressStart}
-        onMouseUp={handleSOSPressEnd}
-        onMouseLeave={handleSOSPressEnd}
-        onTouchStart={handleSOSPressStart}
-        onTouchEnd={handleSOSPressEnd}
-        onTouchMove={handleSOSPressEnd}
-        onTouchCancel={handleSOSPressEnd}
+      <button className="sos-btn" style={{ width: '100%', borderRadius: '24px', margin: 0, height: '80px', fontSize: '24px' }}
+        onMouseDown={handleSOSPressStart} onMouseUp={handleSOSPressEnd} onMouseLeave={handleSOSPressEnd}
+        onTouchStart={handleSOSPressStart} onTouchEnd={handleSOSPressEnd} onTouchMove={handleSOSPressEnd} onTouchCancel={handleSOSPressEnd}
       >
         <ShieldAlert size={28} style={{ marginRight: '12px', display: 'inline-block', verticalAlign: 'middle' }} />
         S.O.S TÁCTICO
       </button>
-      <p style={{ fontSize: '11px', opacity: 0.5, textAlign: 'center', margin: '-10px 0 0 0' }}>Mantén presionado 2s en emergencia</p>
 
       {/* Logout */}
       <button className="glass-btn secondary" onClick={handleLogout} style={{ opacity: 0.6, marginTop: 'auto' }}>
         <LogOut size={18} /> Salir
       </button>
 
+      {/* Chat Overlay */}
+      <div style={{ position: 'absolute', top: isChatOpen ? 0 : '100%', left: 0, right: 0, bottom: 0, background: 'rgba(15, 23, 42, 0.95)', backdropFilter: 'blur(10px)', zIndex: 2000, transition: 'top 0.3s cubic-bezier(0.4, 0, 0.2, 1)', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', alignItems: 'center', padding: '20px', background: 'rgba(255,255,255,0.05)' }}>
+          <h2 style={{ margin: 0, fontSize: '18px', display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+            <MessageSquare size={20} color="#8b5cf6" /> Comunicación P2P
+          </h2>
+          <button onClick={() => setIsChatOpen(false)} style={{ background: 'none', border: 'none', color: '#ccc' }}>
+            <X size={24} />
+          </button>
+        </div>
+
+        <div ref={chatScrollRef} style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {messages.map((msg) => {
+            const isMe = msg.senderName === userName;
+            return (
+              <div key={msg.id} style={{ alignSelf: isMe ? 'flex-end' : 'flex-start', maxWidth: '80%' }}>
+                <div style={{ fontSize: '11px', opacity: 0.5, marginBottom: '4px', textAlign: isMe ? 'right' : 'left' }}>
+                  {msg.senderName} • {new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                </div>
+                <div style={{ background: isMe ? '#4f46e5' : 'rgba(255,255,255,0.1)', padding: '12px', borderRadius: '16px', borderBottomRightRadius: isMe ? '4px' : '16px', borderBottomLeftRadius: isMe ? '16px' : '4px' }}>
+                  {msg.type === 'TEXT' ? (
+                    <span style={{ fontSize: '14px' }}>{msg.content}</span>
+                  ) : (
+                    <audio controls src={msg.content} style={{ height: '30px', maxWidth: '100%' }} />
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          {messages.length === 0 && <p style={{ textAlign: 'center', opacity: 0.5, marginTop: '50px' }}>No hay mensajes. Usa el PTT para enviar un audio táctico.</p>}
+        </div>
+
+        {/* Input Area */}
+        <div style={{ padding: '20px', background: 'rgba(255,255,255,0.05)', display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <input type="text" value={textInput} onChange={(e) => setTextInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSendText()} placeholder="Mensaje rápido..." style={{ flex: 1, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', padding: '12px 16px', borderRadius: '24px', color: 'white', outline: 'none' }} />
+          
+          {textInput.trim() ? (
+            <button onClick={handleSendText} style={{ background: '#4f46e5', border: 'none', color: 'white', width: '44px', height: '44px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Send size={18} />
+            </button>
+          ) : (
+            <button 
+              onMouseDown={startRecording} onMouseUp={stopRecording} onMouseLeave={stopRecording}
+              onTouchStart={startRecording} onTouchEnd={stopRecording} onTouchMove={stopRecording} onTouchCancel={stopRecording}
+              style={{ background: isRecording ? '#ef4444' : '#8b5cf6', border: 'none', color: 'white', width: '44px', height: '44px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s', animation: isRecording ? 'pulse 1s infinite' : 'none' }}>
+              <Mic size={20} />
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
