@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useStore, type ChatMessage } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { QRCode } from 'react-qr-code';
-import { Menu, X, QrCode, LogOut, Focus, AlertCircle, ShieldAlert, Smartphone, BellOff, MessageSquare, Send, Mic } from 'lucide-react';
+import { Menu, X, QrCode, LogOut, Focus, AlertCircle, ShieldAlert, Smartphone, BellOff, MessageSquare, Send, Mic, MapPin } from 'lucide-react';
 import Peer from 'peerjs';
 import { Geolocation } from '@capacitor/geolocation';
 
@@ -61,6 +61,7 @@ export default function MonitorDashboard() {
 
   const [toasts, setToasts] = useState<{id: number, msg: string}[]>([]);
   const [remoteSOSActive, setRemoteSOSActive] = useState(false);
+  const geofenceStrikesRef = useRef<Record<string, number>>({});
 
   // Chat UI
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -124,7 +125,19 @@ export default function MonitorDashboard() {
           if (myLocation) {
             const dist = getDistance(myLocation[0], myLocation[1], data.lat, data.lng);
             if (dist > localRadius) {
-              showToast(`⚠️ ${data.name} salió de la zona segura (${Math.round(dist)}m)`);
+              const currentStrikes = (geofenceStrikesRef.current[data.name] || 0) + 1;
+              geofenceStrikesRef.current[data.name] = currentStrikes;
+              
+              if (currentStrikes === 3) {
+                showToast(`⚠️ ${data.name} salió de la zona segura (${Math.round(dist)}m)`);
+              } else if (currentStrikes > 3 && currentStrikes % 10 === 0) {
+                showToast(`⚠️ ${data.name} sigue fuera de zona (${Math.round(dist)}m)`);
+              }
+            } else {
+              if ((geofenceStrikesRef.current[data.name] || 0) >= 3) {
+                showToast(`✅ ${data.name} volvió a la zona segura.`);
+              }
+              geofenceStrikesRef.current[data.name] = 0;
             }
           }
         }
@@ -214,6 +227,16 @@ export default function MonitorDashboard() {
        }
      }
   }
+
+  const requestSilentLocation = (peerId: string) => {
+    const peer = peerRef.current;
+    if (peer && (peer.connections as any)[peerId]) {
+      (peer.connections as any)[peerId].forEach((conn: any) => {
+        if (conn.open) conn.send({ type: 'SILENT_PING' });
+      });
+      showToast('📡 Solicitando ubicación en sigilo...');
+    }
+  };
 
   const toggleRemoteSOS = () => {
     const newState = !remoteSOSActive;
@@ -356,11 +379,16 @@ export default function MonitorDashboard() {
               <span style={{ fontSize: '14px' }}>Aún no hay hijos conectados</span>
             </div>
           ) : (
-            Object.values(clients).map((c, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', background: c.isOnline ? 'rgba(79, 70, 229, 0.2)' : 'rgba(156, 163, 175, 0.2)', borderRadius: '12px', marginBottom: '8px' }}>
+            Object.entries(clients).map(([id, c]) => (
+              <div key={id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', background: c.isOnline ? 'rgba(79, 70, 229, 0.2)' : 'rgba(156, 163, 175, 0.2)', borderRadius: '12px', marginBottom: '8px' }}>
                 <div style={{ width: 10, height: 10, borderRadius: '50%', background: c.isOnline ? '#4ade80' : '#9ca3af' }}></div>
-                <span style={{ fontSize: '15px', fontWeight: 'bold', color: c.isOnline ? 'inherit' : '#9ca3af' }}>{c.name}</span>
-                {!c.isOnline && <span style={{ fontSize: '11px', opacity: 0.5, marginLeft: 'auto' }}>Offline</span>}
+                <span style={{ fontSize: '15px', fontWeight: 'bold', color: c.isOnline ? 'inherit' : '#9ca3af', flex: 1 }}>{c.name}</span>
+                {!c.isOnline && <span style={{ fontSize: '11px', opacity: 0.5 }}>Offline</span>}
+                {c.isOnline && (
+                  <button onClick={() => requestSilentLocation(id)} style={{ background: 'none', border: 'none', color: '#ec4899', padding: '4px', display: 'flex', alignItems: 'center', cursor: 'pointer' }} title="Actualizar GPS en sigilo">
+                    <MapPin size={18} />
+                  </button>
+                )}
               </div>
             ))
           )}

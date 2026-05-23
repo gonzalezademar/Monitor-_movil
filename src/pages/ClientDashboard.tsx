@@ -45,6 +45,7 @@ export default function ClientDashboard() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const oscillatorRef = useRef<OscillatorNode | null>(null);
   const [isRemoteAlarmActive, setIsRemoteAlarmActive] = useState(false);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Chat State
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -63,6 +64,7 @@ export default function ClientDashboard() {
       if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
         mediaRecorderRef.current.stop();
       }
+      if (reconnectTimerRef.current) clearInterval(reconnectTimerRef.current);
     };
   }, []);
 
@@ -117,45 +119,66 @@ export default function ClientDashboard() {
   useEffect(() => {
     if (!masterServerId) return;
 
-    const peer = new Peer();
-    peerRef.current = peer;
+    const connectPeer = () => {
+      if (peerRef.current) peerRef.current.destroy();
+      const peer = new Peer();
+      peerRef.current = peer;
 
-    peer.on('open', (id) => {
-      setMyPeerId(id);
-      const conn = peer.connect(masterServerId);
-      connRef.current = conn;
-      
-      conn.on('open', () => {
-        setIsConnected(true);
+      peer.on('open', (id) => {
+        setMyPeerId(id);
+        const conn = peer.connect(masterServerId);
+        connRef.current = conn;
         
-        // Flush Offline Queue
-        const currentQueue = useStore.getState().offlineQueue;
-        if (currentQueue.length > 0) {
-           currentQueue.forEach(action => conn.send(action));
-           useStore.getState().clearOfflineQueue();
-        }
-
-        setInterval(() => {
-          if (connRef.current && connRef.current.open) {
-            connRef.current.send({ type: 'HEARTBEAT', name: userName });
+        conn.on('open', () => {
+          setIsConnected(true);
+          
+          // Flush Offline Queue
+          const currentQueue = useStore.getState().offlineQueue;
+          if (currentQueue.length > 0) {
+             currentQueue.forEach(action => conn.send(action));
+             useStore.getState().clearOfflineQueue();
           }
-        }, 5000);
-      });
 
-      conn.on('data', (data: any) => {
-        if (data.type === 'REMOTE_SOS') playRemoteAlarm();
-        if (data.type === 'STOP_REMOTE_SOS') stopRemoteAlarm();
-        if (data.type === 'CHAT_MSG') {
-           addMessage(data.message);
-        }
+          setInterval(() => {
+            if (connRef.current && connRef.current.open) {
+              connRef.current.send({ type: 'HEARTBEAT', name: userName });
+            }
+          }, 5000);
+        });
+
+        conn.on('data', (data: any) => {
+          if (data.type === 'REMOTE_SOS' && !useStore.getState().isSOSActive) playRemoteAlarm();
+          if (data.type === 'STOP_REMOTE_SOS') stopRemoteAlarm();
+          if (data.type === 'CHAT_MSG') {
+             addMessage(data.message);
+          }
+          if (data.type === 'SILENT_PING') {
+             // Force update location without alerting user
+             Geolocation.getCurrentPosition({ enableHighAccuracy: true }).then(pos => {
+               if (connRef.current && connRef.current.open) {
+                 connRef.current.send({ type: 'LOCATION', lat: pos.coords.latitude, lng: pos.coords.longitude, name: userName || 'Cliente' });
+               }
+             }).catch(e => console.log('Silent ping failed', e));
+          }
+        });
+        
+        conn.on('close', () => setIsConnected(false));
+        conn.on('error', () => setIsConnected(false));
       });
-      
-      conn.on('close', () => setIsConnected(false));
-      conn.on('error', () => setIsConnected(false));
-    });
+    };
+
+    connectPeer();
+
+    reconnectTimerRef.current = setInterval(() => {
+      // Auto-reconnect Watchdog
+      if (!connRef.current || !connRef.current.open) {
+        connectPeer();
+      }
+    }, 5000);
 
     return () => {
-      peer.destroy();
+      if (reconnectTimerRef.current) clearInterval(reconnectTimerRef.current);
+      if (peerRef.current) peerRef.current.destroy();
     };
   }, [masterServerId, setMyPeerId, userName, addMessage]);
 
@@ -198,10 +221,13 @@ export default function ClientDashboard() {
 
   // SOS status
   useEffect(() => {
-    if (isSOSActive && connRef.current && connRef.current.open) {
-      connRef.current.send({ type: 'SOS_ALERT', name: userName || 'Cliente' });
-    } else if (isSOSActive && (!connRef.current || !connRef.current.open)) {
-      enqueueOfflineAction({ type: 'SOS_ALERT', name: userName || 'Cliente' });
+    if (isSOSActive) {
+      stopRemoteAlarm(); // Prioridad sigilo
+      if (connRef.current && connRef.current.open) {
+        connRef.current.send({ type: 'SOS_ALERT', name: userName || 'Cliente' });
+      } else {
+        enqueueOfflineAction({ type: 'SOS_ALERT', name: userName || 'Cliente' });
+      }
     }
   }, [isSOSActive, userName, enqueueOfflineAction]);
 
@@ -220,7 +246,12 @@ export default function ClientDashboard() {
     if (connRef.current && connRef.current.open) {
       connRef.current.send(action);
     } else {
-      enqueueOfflineAction(action);
+      // Evitar cuelgue de memoria por notas de voz offline (Límite LocalStorage)
+      if (msg.type !== 'AUDIO') {
+        enqueueOfflineAction(action);
+      } else {
+        alert("Sin conexión: La nota de voz no se pudo enviar y fue descartada para ahorrar memoria.");
+      }
     }
   };
 

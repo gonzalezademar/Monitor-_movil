@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { QRCode } from 'react-qr-code';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import { ShieldAlert, User, QrCode, Scan, ArrowLeft, Camera, RefreshCcw, Radar } from 'lucide-react';
+import { Geolocation } from '@capacitor/geolocation';
 
 export default function Onboarding() {
   const { setRole, setUserName, setMasterServerId, role } = useStore();
@@ -34,12 +35,21 @@ export default function Onboarding() {
     if (role === 'client') navigate('/client');
   }, [role, navigate]);
 
-  const handleSelectRole = (selectedRole: 'monitor' | 'client') => {
+  const handleSelectRole = async (selectedRole: 'monitor' | 'client') => {
     if (!nameInput.trim()) {
       setNameError('Por favor ingresa tu nombre antes de continuar.');
       return;
     }
     setNameError('');
+    
+    // Solicitar permisos críticos anticipadamente
+    try {
+      await navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => stream.getTracks().forEach(t => t.stop())).catch(() => console.log('Mic no autorizado aún'));
+      await Geolocation.requestPermissions();
+    } catch (e) {
+      console.log('Error pidiendo permisos anticipados', e);
+    }
+
     setTempRole(selectedRole);
     setStep(2);
   };
