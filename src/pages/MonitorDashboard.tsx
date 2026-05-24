@@ -286,7 +286,34 @@ export default function MonitorDashboard() {
     const myTutorId = `${masterServerId}-${tutorSlot || 'T1'}`;
     console.log("Inicializando Peer de Tutor en:", myTutorId);
 
-    const peer = new Peer(myTutorId);
+    const peerConfig = {
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
+          { urls: 'stun:stun3.l.google.com:19302' },
+          { urls: 'stun:stun4.l.google.com:19302' },
+          {
+            urls: 'turn:openrelay.metered.ca:80',
+            username: 'openrelay',
+            credential: 'openrelay'
+          },
+          {
+            urls: 'turn:openrelay.metered.ca:443',
+            username: 'openrelay',
+            credential: 'openrelay'
+          },
+          {
+            urls: 'turns:openrelay.metered.ca:443?transport=tcp',
+            username: 'openrelay',
+            credential: 'openrelay'
+          }
+        ],
+        sdpSemantics: 'unified-plan'
+      }
+    };
+    const peer = new Peer(myTutorId, peerConfig);
     peerRef.current = peer;
 
     peer.on('open', () => {
