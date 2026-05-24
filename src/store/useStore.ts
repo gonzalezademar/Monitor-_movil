@@ -14,12 +14,16 @@ interface AppState {
   userName: string;
   masterServerId: string | null;
   myPeerId: string | null;
+  familyCode: string | null;
+  tutorSlot: 'T1' | 'T2' | null;
   setRole: (role: 'monitor' | 'client') => void;
   setUserName: (name: string) => void;
   avatarBase64: string | null;
   setAvatar: (base64: string) => void;
   setMasterServerId: (id: string) => void;
   setMyPeerId: (id: string) => void;
+  setFamilyCode: (code: string | null) => void;
+  setTutorSlot: (slot: 'T1' | 'T2' | null) => void;
   isSOSActive: boolean;
   setSOSActive: (active: boolean) => void;
   fenceRadius: number;
@@ -44,11 +48,15 @@ export const useStore = create<AppState>()(
       avatarBase64: null,
       masterServerId: null,
       myPeerId: null,
+      familyCode: null,
+      tutorSlot: null,
       setRole: (role) => set({ role }),
       setUserName: (name) => set({ userName: name }),
       setAvatar: (base64) => set({ avatarBase64: base64 }),
       setMasterServerId: (id) => set({ masterServerId: id }),
       setMyPeerId: (id) => set({ myPeerId: id }),
+      setFamilyCode: (code) => set({ familyCode: code }),
+      setTutorSlot: (slot) => set({ tutorSlot: slot }),
       isSOSActive: false,
       setSOSActive: (active) => set({ isSOSActive: active }),
       fenceRadius: 100,
@@ -58,12 +66,12 @@ export const useStore = create<AppState>()(
       offlineQueue: [],
       addMessage: (msg) => set((state) => ({ messages: [...state.messages, msg].slice(-15) })), // Keep last 15
       cleanOldMessages: () => set((state) => ({ 
-        messages: state.messages.filter(m => Date.now() - m.timestamp < 24 * 60 * 60 * 1000) 
+         messages: state.messages.filter(m => Date.now() - m.timestamp < 24 * 60 * 60 * 1000) 
       })),
       enqueueOfflineAction: (action) => set((state) => ({ offlineQueue: [...state.offlineQueue, action] })),
       clearOfflineQueue: () => set({ offlineQueue: [] }),
 
-      logout: () => set({ role: null, userName: '', avatarBase64: null, masterServerId: null, myPeerId: null, isSOSActive: false, fenceRadius: 100, messages: [], offlineQueue: [] })
+      logout: () => set({ role: null, userName: '', avatarBase64: null, masterServerId: null, myPeerId: null, familyCode: null, tutorSlot: null, isSOSActive: false, fenceRadius: 100, messages: [], offlineQueue: [] })
     }),
     {
       name: 'radar-storage',

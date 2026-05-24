@@ -7,13 +7,13 @@ import { ShieldAlert, User, QrCode, Scan, ArrowLeft, Camera, RefreshCcw, Radar }
 import { Geolocation } from '@capacitor/geolocation';
 
 export default function Onboarding() {
-  const { setRole, setUserName, setMasterServerId, role } = useStore();
+  const { setRole, setUserName, setMasterServerId, setFamilyCode, setTutorSlot, role } = useStore();
   const navigate = useNavigate();
   const [nameInput, setNameInput] = useState('');
   const [nameError, setNameError] = useState('');
   const [cameraError, setCameraError] = useState('');
   const [step, setStep] = useState(1);
-  const [tempRole, setTempRole] = useState<'monitor' | 'client' | null>(null);
+  const [tempRole, setTempRole] = useState<'monitor' | 'secondary_monitor' | 'client' | null>(null);
   const [scanError, setScanError] = useState(false);
   const [avatarInput, setAvatarInput] = useState<string | null>(null);
 
@@ -36,7 +36,7 @@ export default function Onboarding() {
     if (role === 'client') navigate('/client');
   }, [role, navigate]);
 
-  const handleSelectRole = async (selectedRole: 'monitor' | 'client') => {
+  const handleSelectRole = async (selectedRole: 'monitor' | 'secondary_monitor' | 'client') => {
     if (!nameInput.trim()) {
       setNameError('Por favor ingresa tu nombre antes de continuar.');
       return;
@@ -68,7 +68,11 @@ export default function Onboarding() {
     }
 
     setTempRole(selectedRole);
-    setStep(2);
+    if (selectedRole === 'monitor') {
+      setStep(2);
+    } else {
+      setStep(2); // Goes to scan for both client and secondary_monitor
+    }
   };
 
   // Cancela timers pendientes al volver — evita que mensajes de error aparezcan en step 1
@@ -85,6 +89,8 @@ export default function Onboarding() {
     setUserName(nameInput);
     if (avatarInput) useStore.getState().setAvatar(avatarInput);
     setMasterServerId(serverCode);
+    setFamilyCode(serverCode);
+    setTutorSlot('T1');
     setRole('monitor');
   };
 
@@ -95,9 +101,17 @@ export default function Onboarding() {
         setScanError(false);
         if (scanErrorTimerRef.current) clearTimeout(scanErrorTimerRef.current);
         setMasterServerId(text);
+        setFamilyCode(text);
         setUserName(nameInput);
         if (avatarInput) useStore.getState().setAvatar(avatarInput);
-        setRole('client');
+        
+        if (tempRole === 'secondary_monitor') {
+          setTutorSlot('T2');
+          setRole('monitor');
+        } else {
+          setTutorSlot(null);
+          setRole('client');
+        }
       } else {
         setScanError(true);
         // ESTABILIDAD: timer con ref — se cancela correctamente en desmontaje y en re-scan
@@ -206,12 +220,15 @@ export default function Onboarding() {
               )}
             </div>
 
-            <div className="role-buttons">
+            <div className="role-buttons" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <button className="glass-btn primary" onClick={() => handleSelectRole('monitor')}>
-                <QrCode size={18} /> Soy Monitor (Padre)
+                <QrCode size={18} /> Soy Tutor Principal (Padre/Madre)
               </button>
-              <button className="glass-btn secondary" onClick={() => handleSelectRole('client')}>
-                <Scan size={18} /> Soy Rastreable (Hijo)
+              <button className="glass-btn secondary" onClick={() => handleSelectRole('secondary_monitor')}>
+                <Scan size={18} /> Soy Tutor Secundario (Tutor)
+              </button>
+              <button className="glass-btn secondary" style={{ opacity: 0.8, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.02)' }} onClick={() => handleSelectRole('client')}>
+                <User size={18} /> Soy Rastreable (Hijo/Hija)
               </button>
             </div>
           </div>
@@ -221,7 +238,7 @@ export default function Onboarding() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', alignItems: 'center' }}>
             <div>
               <h3 style={{ fontSize: '18px', margin: 0 }}>Tu Código</h3>
-              <p style={{ fontSize: '13px', opacity: 0.7, margin: '4px 0 0' }}>Escanea esto con el teléfono de tu hijo</p>
+              <p style={{ fontSize: '13px', opacity: 0.7, margin: '4px 0 0' }}>Escanea esto con los demás celulares</p>
             </div>
             
             <div style={{ background: 'white', padding: '16px', borderRadius: '16px', display: 'inline-block', boxShadow: '0 4px 20px rgba(0,0,0,0.2)' }}>
@@ -239,11 +256,13 @@ export default function Onboarding() {
           </div>
         )}
 
-        {step === 2 && tempRole === 'client' && (
+        {step === 2 && (tempRole === 'client' || tempRole === 'secondary_monitor') && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', alignItems: 'center', width: '100%' }}>
             <div>
               <h3 style={{ fontSize: '18px', margin: 0 }}>Escanear</h3>
-              <p style={{ fontSize: '13px', opacity: 0.7, margin: '4px 0 0' }}>Apunta al código QR del Padre</p>
+              <p style={{ fontSize: '13px', opacity: 0.7, margin: '4px 0 0' }}>
+                Apunta al código QR del Tutor Principal
+              </p>
             </div>
 
             {cameraError ? (
@@ -269,7 +288,7 @@ export default function Onboarding() {
             {scanError && (
               <div style={{ background: 'rgba(252,165,165,0.1)', padding: '10px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <ShieldAlert size={16} color="#fca5a5" />
-                <span style={{ color: '#fca5a5', fontSize: '13px' }}>QR inválido — usa el del Padre</span>
+                <span style={{ color: '#fca5a5', fontSize: '13px' }}>QR inválido — usa el del Tutor Principal</span>
               </div>
             )}
 

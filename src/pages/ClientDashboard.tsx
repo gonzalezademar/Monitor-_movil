@@ -39,8 +39,10 @@ export default function ClientDashboard() {
   const tapCountRef  = useRef(0);
 
   const peerRef = useRef<Peer | null>(null);
-  const connRef = useRef<any>(null);
+  const connsRef = useRef<{ T1: any; T2: any }>({ T1: null, T2: null });
   const [isConnected, setIsConnected] = useState(false);
+  const [t1Connected, setT1Connected] = useState(false);
+  const [t2Connected, setT2Connected] = useState(false);
   const [myLocation, setMyLocation] = useState<[number, number] | null>(null);
   const [monitorLocation, setMonitorLocation] = useState<{lat: number, lng: number, avatar: string | null} | null>(null);
   const [ghostModeActive, setGhostModeActive] = useState(false);
@@ -65,7 +67,10 @@ export default function ClientDashboard() {
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const cancelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wakeLockRef = useRef<any>(null);
-  const lastPingRef = useRef<number>(Date.now());
+  
+  const lastPingT1Ref = useRef<number>(Date.now());
+  const lastPingT2Ref = useRef<number>(Date.now());
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const discardRecordingRef = useRef<boolean>(false);
@@ -76,8 +81,10 @@ export default function ClientDashboard() {
   const monitorIconCache = useRef<Record<string, L.DivIcon>>({});
   
   // Anti-Spam Reconnection Backoff
-  const reconnectAttemptsRef = useRef(0);
-  const lastReconnectTimeRef = useRef(0);
+  const reconnectAttemptsT1Ref = useRef(0);
+  const reconnectAttemptsT2Ref = useRef(0);
+  const lastReconnectT1Ref = useRef(0);
+  const lastReconnectT2Ref = useRef(0);
   const [gpsError, setGpsError] = useState<string | null>(null);
 
   const acquireWakeLock = async () => {
@@ -160,123 +167,229 @@ export default function ClientDashboard() {
     setIsRemoteAlarmActive(false);
   };
 
+  const updateGlobalConnectionStatus = () => {
+    setTimeout(() => {
+      const anyConnected = !!((connsRef.current.T1 && connsRef.current.T1.open) || (connsRef.current.T2 && connsRef.current.T2.open));
+      setIsConnected(anyConnected);
+      if (!anyConnected && isConnectedRef.current) {
+        playTonalSound('P2P_LOST');
+      }
+      isConnectedRef.current = anyConnected;
+    }, 100);
+  };
+
+  const sendToTutors = (action: any): boolean => {
+    let sent = false;
+    Object.entries(connsRef.current).forEach(([_, conn]: [string, any]) => {
+      if (conn && conn.open) {
+        conn.send(action);
+        sent = true;
+      }
+    });
+    return sent;
+  };
+
+  const connectToTutor = (slot: 'T1' | 'T2') => {
+    if (!peerRef.current || peerRef.current.destroyed || peerRef.current.disconnected) return;
+    
+    const existingConn = connsRef.current[slot];
+    if (existingConn && existingConn.open) return;
+
+    const now = Date.now();
+    const attempts = slot === 'T1' ? reconnectAttemptsT1Ref.current : reconnectAttemptsT2Ref.current;
+    const lastRec = slot === 'T1' ? lastReconnectT1Ref.current : lastReconnectT2Ref.current;
+    const delay = Math.min(5000 * Math.pow(2, attempts), 60000);
+
+    if (now - lastRec < delay && attempts > 0) {
+      return; 
+    }
+
+    if (slot === 'T1') {
+      lastReconnectT1Ref.current = now;
+      reconnectAttemptsT1Ref.current += 1;
+    } else {
+      lastReconnectT2Ref.current = now;
+      reconnectAttemptsT2Ref.current += 1;
+    }
+
+    const targetId = `${masterServerId}-${slot}`;
+    console.log(`Conectando a Tutor ${slot} (${targetId})...`);
+    
+    try {
+      const conn = peerRef.current.connect(targetId, {
+        serialization: 'json',
+        reliable: true
+      });
+      
+      connsRef.current[slot] = conn;
+
+      conn.on('open', () => {
+        console.log(`Conectado a Tutor ${slot}!`);
+        if (slot === 'T1') {
+          setT1Connected(true);
+          reconnectAttemptsT1Ref.current = 0;
+          lastPingT1Ref.current = Date.now();
+        } else {
+          setT2Connected(true);
+          reconnectAttemptsT2Ref.current = 0;
+          lastPingT2Ref.current = Date.now();
+        }
+        updateGlobalConnectionStatus();
+        playTonalSound('P2P_HANDSHAKE');
+
+        conn.send({ type: 'USER_PROFILE', name: userName, avatar: avatarBase64 });
+
+        const currentQueue = useStore.getState().offlineQueue;
+        if (currentQueue.length > 0) {
+          const uniqueQueue = currentQueue.filter((v: any, i: number, a: any[]) => {
+             if (v.type === 'CHECK_IN') {
+                return a.findIndex(t => t.type === 'CHECK_IN') === i;
+             }
+             return true;
+          });
+          uniqueQueue.forEach(action => conn.send(action));
+          useStore.getState().clearOfflineQueue();
+        }
+      });
+
+      conn.on('data', (data: any) => {
+        if (slot === 'T1') lastPingT1Ref.current = Date.now();
+        else lastPingT2Ref.current = Date.now();
+
+        if (data.type === 'MONITOR_HEARTBEAT') {
+          conn.send({ type: 'HEARTBEAT', name: userName });
+          return;
+        }
+        
+        if (data.type === 'REMOTE_SOS') {
+           setGhostModeActive(false);
+           releaseWakeLock();
+           if (!useStore.getState().isSOSActive) playRemoteAlarm();
+        }
+        if (data.type === 'STOP_REMOTE_SOS') {
+           stopRemoteAlarm();
+           setGhostModeActive(false);
+           if (!useStore.getState().isSOSActive) releaseWakeLock();
+        }
+        if (data.type === 'GHOST_MODE') {
+           setGhostModeActive(true);
+           acquireWakeLock();
+           stopRemoteAlarm();
+        }
+        if (data.type === 'SOS_ALERT') {
+           if (!useStore.getState().isSOSActive) {
+              playRemoteAlarm();
+           }
+        }
+        if (data.type === 'MONITOR_LOCATION') {
+           setMonitorLocation({ lat: data.lat, lng: data.lng, avatar: data.avatar });
+        }
+        if (data.type === 'CHAT_MSG') {
+           addMessage(data.message);
+           playTonalSound('CHAT_RECEIVE');
+        }
+
+        if (data.type === 'SILENT_PING' || data.type === 'GHOST_MODE') {
+           Geolocation.getCurrentPosition({ enableHighAccuracy: true }).then(pos => {
+             if (conn.open) {
+               conn.send({ type: 'LOCATION', lat: pos.coords.latitude, lng: pos.coords.longitude, name: userName || 'Cliente' });
+             }
+           }).catch(e => console.log('Silent ping failed', e));
+        }
+      });
+      
+      conn.on('close', () => {
+        console.log(`Conexión cerrada con Tutor ${slot}`);
+        if (slot === 'T1') {
+          setT1Connected(false);
+        } else {
+          setT2Connected(false);
+        }
+        updateGlobalConnectionStatus();
+      });
+
+      conn.on('error', (err) => {
+        console.warn(`Error en conexión con Tutor ${slot}:`, err);
+        if (slot === 'T1') {
+          setT1Connected(false);
+        } else {
+          setT2Connected(false);
+        }
+        updateGlobalConnectionStatus();
+      });
+    } catch (e) {
+      console.error(`Error al iniciar conexión con ${targetId}:`, e);
+    }
+  };
+
+  const setupPeer = () => {
+    if (peerRef.current && !peerRef.current.destroyed) {
+      peerRef.current.destroy();
+    }
+    const savedPeerId = useStore.getState().myPeerId;
+    const peer = savedPeerId ? new Peer(savedPeerId) : new Peer();
+    peerRef.current = peer;
+
+    peer.on('open', (id) => {
+      setMyPeerId(id);
+      connectToTutor('T1');
+      connectToTutor('T2');
+    });
+
+    peer.on('error', (err) => {
+      console.warn("PeerJS error:", err);
+      if (peer.disconnected) {
+        peer.reconnect();
+      }
+    });
+
+    peer.on('disconnected', () => {
+      console.log("PeerJS disconnected. Reconnecting...");
+      if (!peer.destroyed) {
+        peer.reconnect();
+      }
+    });
+  };
+
   // P2P Connection
   useEffect(() => {
     if (!masterServerId) return;
 
-    const connectPeer = () => {
-      const now = Date.now();
-      const delay = Math.min(5000 * Math.pow(2, reconnectAttemptsRef.current), 60000);
-      if (now - lastReconnectTimeRef.current < delay && reconnectAttemptsRef.current > 0) {
-        return; // Esperar backoff
-      }
-      lastReconnectTimeRef.current = now;
-      reconnectAttemptsRef.current += 1;
-
-      if (peerRef.current) peerRef.current.destroy();
-      // FIJAR PEER ID: Evita crear clones zombis en el monitor si se reconecta.
-      const savedPeerId = useStore.getState().myPeerId;
-      const peer = savedPeerId ? new Peer(savedPeerId) : new Peer();
-      peerRef.current = peer;
-
-      peer.on('open', (id) => {
-        setMyPeerId(id);
-        const conn = peer.connect(masterServerId);
-        connRef.current = conn;
-        
-        conn.on('open', () => {
-          setIsConnected(true);
-          isConnectedRef.current = true;
-          reconnectAttemptsRef.current = 0; // Reset backoff
-          playTonalSound('P2P_HANDSHAKE');
-          
-          // Enviar perfil pesado SOLO una vez al conectar
-          conn.send({ type: 'USER_PROFILE', name: userName, avatar: avatarBase64 });
-          
-          // Flush Offline Queue con Deduplicación (Aduana Anti-Spam)
-          const currentQueue = useStore.getState().offlineQueue;
-          if (currentQueue.length > 0) {
-             const uniqueQueue = currentQueue.filter((v, i, a) => {
-                if (v.type === 'CHECK_IN') {
-                   return a.findIndex(t => t.type === 'CHECK_IN') === i;
-                }
-                return true;
-             });
-             uniqueQueue.forEach(action => conn.send(action));
-             useStore.getState().clearOfflineQueue();
-          }
-
-          setInterval(() => {
-            if (connRef.current && connRef.current.open) {
-              connRef.current.send({ type: 'HEARTBEAT', name: userName }); // Sin avatar, ultra ligero
-            }
-          }, 5000);
-        });
-
-        conn.on('data', (data: any) => {
-          if (data.type === 'REMOTE_SOS') {
-             setGhostModeActive(false); // Anula sigilo visual si suena sirena
-             releaseWakeLock();
-             if (!useStore.getState().isSOSActive) playRemoteAlarm();
-          }
-          if (data.type === 'STOP_REMOTE_SOS') {
-             stopRemoteAlarm();
-             setGhostModeActive(false);
-             if (!useStore.getState().isSOSActive) releaseWakeLock();
-          }
-          if (data.type === 'GHOST_MODE') {
-             setGhostModeActive(true);
-             acquireWakeLock(); // Prohibe apagar pantalla
-             stopRemoteAlarm(); // Prioridad sigilo
-          }
-          if (data.type === 'SOS_ALERT') {
-             // Eco comunitario: suena sirena por otro miembro
-             if (!useStore.getState().isSOSActive) {
-                playRemoteAlarm();
-             }
-          }
-          if (data.type === 'MONITOR_LOCATION') {
-             setMonitorLocation({ lat: data.lat, lng: data.lng, avatar: data.avatar });
-          }
-          if (data.type === 'CHAT_MSG') {
-             addMessage(data.message);
-             playTonalSound('CHAT_RECEIVE');
-          }
-          // Activar latido (Anti-Zombi)
-          lastPingRef.current = Date.now();
-
-          if (data.type === 'SILENT_PING' || data.type === 'GHOST_MODE') {
-             // Force update location without alerting user
-             Geolocation.getCurrentPosition({ enableHighAccuracy: true }).then(pos => {
-               if (connRef.current && connRef.current.open) {
-                 connRef.current.send({ type: 'LOCATION', lat: pos.coords.latitude, lng: pos.coords.longitude, name: userName || 'Cliente' });
-               }
-             }).catch(e => console.log('Silent ping failed', e));
-          }
-        });
-        
-        conn.on('close', () => {
-          if (isConnectedRef.current) playTonalSound('P2P_LOST');
-          setIsConnected(false);
-          isConnectedRef.current = false;
-        });
-        conn.on('error', () => {
-          if (isConnectedRef.current) playTonalSound('P2P_LOST');
-          setIsConnected(false);
-          isConnectedRef.current = false;
-        });
-      });
-    };
-
-    connectPeer();
+    setupPeer();
 
     reconnectTimerRef.current = setInterval(() => {
       const now = Date.now();
-      // Auto-reconnect Watchdog & Zombie killer
-      if (!connRef.current || !connRef.current.open || (now - lastPingRef.current > 15000)) {
-        console.log("Destruyendo conexión zombi y reconectando...");
-        connectPeer();
+      
+      if (!peerRef.current || peerRef.current.destroyed) {
+        setupPeer();
+        return;
       }
+
+      if (peerRef.current.disconnected) {
+        peerRef.current.reconnect();
+      }
+
+      // Check Tutor 1
+      if (!connsRef.current.T1 || !connsRef.current.T1.open || (now - lastPingT1Ref.current > 20000)) {
+        if (connsRef.current.T1) {
+          connsRef.current.T1.close();
+          connsRef.current.T1 = null;
+        }
+        setT1Connected(false);
+        connectToTutor('T1');
+      }
+      
+      // Check Tutor 2
+      if (!connsRef.current.T2 || !connsRef.current.T2.open || (now - lastPingT2Ref.current > 20000)) {
+        if (connsRef.current.T2) {
+          connsRef.current.T2.close();
+          connsRef.current.T2 = null;
+        }
+        setT2Connected(false);
+        connectToTutor('T2');
+      }
+      
+      updateGlobalConnectionStatus();
     }, 5000);
 
     return () => {
@@ -304,13 +417,13 @@ export default function ClientDashboard() {
              if (position) {
                  const coords: [number, number] = [position.coords.latitude, position.coords.longitude];
                  setMyLocation(coords);
-                 if (connRef.current && connRef.current.open && useStore.getState().isSOSActive) {
-                     connRef.current.send({
+                 if (useStore.getState().isSOSActive) {
+                     sendToTutors({
                          type: 'LOCATION',
                          lat: position.coords.latitude,
                          lng: position.coords.longitude,
                          name: userName || 'Cliente'
-                     });
+                      });
                  }
              }
           }
@@ -332,9 +445,8 @@ export default function ClientDashboard() {
     if (isSOSActive) {
       stopRemoteAlarm(); // Prioridad sigilo
       acquireWakeLock(); // No dormir en pánico
-      if (connRef.current && connRef.current.open) {
-        connRef.current.send({ type: 'SOS_ALERT', name: userName || 'Cliente' });
-      } else {
+      const sent = sendToTutors({ type: 'SOS_ALERT', name: userName || 'Cliente' });
+      if (!sent) {
         enqueueOfflineAction({ type: 'SOS_ALERT', name: userName || 'Cliente' });
       }
     } else {
@@ -348,9 +460,8 @@ export default function ClientDashboard() {
       action.lat = myLocation[0];
       action.lng = myLocation[1];
     }
-    if (connRef.current && connRef.current.open) {
-      connRef.current.send(action);
-    } else {
+    const sent = sendToTutors(action);
+    if (!sent) {
       enqueueOfflineAction(action);
     }
   };
@@ -358,9 +469,8 @@ export default function ClientDashboard() {
   const dispatchChatMessage = (msg: ChatMessage) => {
     addMessage(msg);
     const action = { type: 'CHAT_MSG', message: msg };
-    if (connRef.current && connRef.current.open) {
-      connRef.current.send(action);
-    } else {
+    const sent = sendToTutors(action);
+    if (!sent) {
       // Evitar cuelgue de memoria por notas de voz offline (Límite LocalStorage)
       if (msg.type !== 'AUDIO') {
         enqueueOfflineAction(action);
@@ -506,9 +616,7 @@ export default function ClientDashboard() {
   const cancelSOS = () => {
     setSOSActive(false);
     stopRemoteAlarm(); // Apagado forzoso de cualquier alarma que esté sonando de fondo
-    if (connRef.current && connRef.current.open) {
-      connRef.current.send({ type: 'SOS_CANCELED', name: userName });
-    }
+    sendToTutors({ type: 'SOS_CANCELED', name: userName });
   };
 
   const startCancelSOS = (e: any) => {
@@ -541,7 +649,29 @@ export default function ClientDashboard() {
 
   const confirmLogout = () => {
     if (unlinkConfirmName.trim() === userName.trim()) {
+      const doubleCheck = window.confirm("¿Está completamente seguro de que desea desvincular el dispositivo? Perderá la conexión de seguridad permanente.");
+      if (!doubleCheck) return;
+
       setIsUnlinkModalOpen(false);
+      
+      // Detener guardián y peer inmediatamente
+      if (reconnectTimerRef.current) {
+        clearInterval(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      if (peerRef.current) {
+        peerRef.current.destroy();
+        peerRef.current = null;
+      }
+      if (connsRef.current.T1) {
+        connsRef.current.T1.close();
+        connsRef.current.T1 = null;
+      }
+      if (connsRef.current.T2) {
+        connsRef.current.T2.close();
+        connsRef.current.T2 = null;
+      }
+
       logout();
       navigate('/');
     }
@@ -633,7 +763,7 @@ export default function ClientDashboard() {
       {/* Top Bar Overlay */}
       <div className="top-bar">
         <button className="icon-btn" onClick={() => setIsMenuOpen(true)}><Menu size={24} /></button>
-        <div className="top-bar-title">{userName} - Rastreable</div>
+        <div className="top-bar-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span className={`led-indicator ${isConnected ? 'led-green' : 'led-red'}`} /><span>{userName} - Rastreable</span></div>
         <button className="icon-btn" onClick={() => setIsChatOpen(true)}>
           <MessageSquare size={24} />
         </button>
@@ -673,14 +803,20 @@ export default function ClientDashboard() {
         </div>
 
         <div style={{ marginBottom: '32px' }}>
-          <p style={{ fontSize: '11px', opacity: 0.5, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>Estado del Sistema</p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', marginBottom: '8px' }}>
-            <span style={{ width: 10, height: 10, borderRadius: '50%', background: isConnected ? '#4ade80' : '#facc15' }} />
-            <span style={{ fontSize: '14px', fontWeight: 'bold' }}>{isConnected ? 'En Línea (Protegido)' : 'Fuera de Línea'}</span>
+          <p style={{ fontSize: '11px', opacity: 0.5, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>Tutores Vinculados</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px' }}>
+              <span className={`led-indicator ${t1Connected ? 'led-green' : 'led-red'}`} />
+              <span style={{ fontSize: '14px' }}>Tutor Principal (T1)</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px' }}>
+              <span className={`led-indicator ${t2Connected ? 'led-green' : 'led-red'}`} />
+              <span style={{ fontSize: '14px' }}>Tutor Secundario (T2)</span>
+            </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', opacity: 0.7 }}>
             <Smartphone size={20} />
-            <span style={{ fontSize: '14px' }}>Código: {masterServerId}</span>
+            <span style={{ fontSize: '14px' }}>Grupo: {masterServerId}</span>
           </div>
         </div>
 

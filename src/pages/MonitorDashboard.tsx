@@ -46,20 +46,43 @@ export default function MonitorDashboard() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   
-  const { logout, masterServerId, fenceRadius, setFenceRadius, userName, avatarBase64, messages, addMessage, cleanOldMessages } = useStore();
+  const { logout, masterServerId, fenceRadius, setFenceRadius, userName, avatarBase64, messages, addMessage, cleanOldMessages, tutorSlot } = useStore();
   const navigate = useNavigate();
   const [localRadius, setLocalRadius] = useState(fenceRadius);
 
   const confirmLogout = () => {
     if (unlinkConfirmName.trim() === userName.trim()) {
+      const doubleCheck = window.confirm("¿Está completamente seguro de que desea desvincular el dispositivo? Perderá el acceso de monitoreo.");
+      if (!doubleCheck) return;
+
       setIsUnlinkModalOpen(false);
+      
+      // Detener peer, conexiones y sirenas de inmediato
+      if (peerRef.current) {
+        peerRef.current.destroy();
+        peerRef.current = null;
+      }
+      if (tutor1ConnRef.current) {
+        tutor1ConnRef.current.close();
+        tutor1ConnRef.current = null;
+      }
+      if (oscillatorRef.current) {
+        oscillatorRef.current.stop();
+        oscillatorRef.current.disconnect();
+        oscillatorRef.current = null;
+      }
+      if (sirenIntervalRef.current) {
+        clearInterval(sirenIntervalRef.current);
+        sirenIntervalRef.current = null;
+      }
+
       logout();
       navigate('/');
     }
   };
   const [myLocation, setMyLocation] = useState<[number, number] | null>(null);
 
-  const [clients, setClients] = useState<Record<string, { lat: number; lng: number; name: string, lastSeen: number, isOnline: boolean, avatar: string | null }>>({});
+  const [clients, setClients] = useState<Record<string, { lat: number; lng: number; name: string, lastSeen: number, isOnline: boolean, avatar: string | null, role?: 'client' | 'monitor' }>>({});
   const [alarmActive, setAlarmActive] = useState<{ active: boolean; originName: string }>({ active: false, originName: '' });
   const [mapCenterTarget, setMapCenterTarget] = useState<[number, number] | null>(null);
   const [gpsError, setGpsError] = useState<string | null>(null);
@@ -69,10 +92,10 @@ export default function MonitorDashboard() {
   // Caché de íconos para evitar parpadeos masivos del mapa
   const markerIconCache = useRef<Record<string, L.DivIcon>>({});
   const getAvatarIcon = (id: string, avatar: string | null, isOnline: boolean, isMonitor: boolean) => {
-    const cacheKey = `${id}_${isOnline ? 'on' : 'off'}_${avatar ? 'avatar' : 'no_avatar'}`;
+    const cacheKey = `${id}_${isOnline ? 'on' : 'off'}_${avatar ? 'avatar' : 'no_avatar'}_${isMonitor ? 'monitor' : 'client'}`;
     if (!markerIconCache.current[cacheKey]) {
       const size = isMonitor ? 36 : 40;
-      const color = isMonitor ? '#8b5cf6' : (isOnline ? '#4ade80' : '#9ca3af');
+      const color = isMonitor ? '#c084fc' : (isOnline ? '#4ade80' : '#9ca3af');
       markerIconCache.current[cacheKey] = L.divIcon({
         className: 'custom-avatar-marker',
         html: avatar 
@@ -87,6 +110,7 @@ export default function MonitorDashboard() {
   
   const audioCtxRef = useRef<AudioContext | null>(null);
   const oscillatorRef = useRef<OscillatorNode | null>(null);
+  const sirenIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const peerRef = useRef<Peer | null>(null);
 
   const [toasts, setToasts] = useState<{id: number, msg: string}[]>([]);
@@ -138,16 +162,104 @@ export default function MonitorDashboard() {
     }
   }, [avatarBase64, cleanOldMessages]);
 
+  const tutor1ConnRef = useRef<any>(null);
+
+  const connectToTutor1 = () => {
+    if (!peerRef.current || peerRef.current.destroyed || peerRef.current.disconnected) return;
+    if (tutor1ConnRef.current && tutor1ConnRef.current.open) return;
+
+    console.log(`Tutor T2 conectándose a Tutor T1 (${masterServerId}-T1)...`);
+    try {
+      const conn = peerRef.current.connect(`${masterServerId}-T1`, {
+        serialization: 'json',
+        reliable: true
+      });
+      tutor1ConnRef.current = conn;
+
+      conn.on('open', () => {
+        console.log("¡Conectado exitosamente con Tutor T1!");
+        conn.send({ type: 'USER_PROFILE', name: userName, avatar: avatarBase64, role: 'monitor' });
+      });
+
+      conn.on('data', (data: any) => {
+        const now = Date.now();
+        if (data.type === 'MONITOR_HEARTBEAT') {
+          conn.send({ type: 'HEARTBEAT', name: userName });
+          return;
+        }
+        if (data.type === 'CHAT_MSG') {
+          addMessage(data.message);
+          showToast(`💬 Mensaje de ${data.message.senderName}`);
+          playTonalSound('CHAT_RECEIVE');
+        }
+        if (data.type === 'SOS_ALERT') {
+          setAlarmActive({ active: true, originName: data.name });
+          playSiren();
+        }
+        if (data.type === 'SOS_CANCELED') {
+          stopSiren();
+          showToast(`⚠️ ${data.name} canceló el SOS.`);
+        }
+        if (data.type === 'MONITOR_LOCATION') {
+          setClients(prev => ({
+            ...prev,
+            [conn.peer]: { ...(prev[conn.peer] || { lastSeen: now }), lat: data.lat, lng: data.lng, name: 'Tutor Principal', isOnline: true, avatar: data.avatar, role: 'monitor' }
+          }));
+        }
+        if (data.type === 'LOCATION') {
+          setClients(prev => ({
+            ...prev,
+            [data.clientPeerId || conn.peer]: { ...(prev[data.clientPeerId || conn.peer] || { lastSeen: now }), lat: data.lat, lng: data.lng, name: data.name, isOnline: true, avatar: data.avatar, role: 'client' }
+          }));
+        }
+      });
+
+      conn.on('close', () => {
+        console.log("Conexión con Tutor T1 cerrada.");
+        tutor1ConnRef.current = null;
+      });
+
+      conn.on('error', (err) => {
+        console.warn("Error en la conexión con Tutor T1:", err);
+        tutor1ConnRef.current = null;
+      });
+    } catch (e) {
+      console.error("Error al iniciar conexión con Tutor T1:", e);
+    }
+  };
+
   // P2P Setup
   useEffect(() => {
     if (!masterServerId) return;
 
-    const peer = new Peer(masterServerId);
+    const myTutorId = `${masterServerId}-${tutorSlot || 'T1'}`;
+    console.log("Inicializando Peer de Tutor en:", myTutorId);
+
+    const peer = new Peer(myTutorId);
     peerRef.current = peer;
+
+    peer.on('open', () => {
+      console.log("Peer de Tutor listo:", myTutorId);
+      if (tutorSlot === 'T2') {
+        connectToTutor1();
+      }
+    });
+
+    peer.on('error', (err) => {
+      console.warn("Monitor PeerJS error:", err);
+      if (peer.disconnected) {
+        peer.reconnect();
+      }
+    });
+
     peer.on('connection', (conn) => {
       conn.on('open', () => {
          isConnectedRef.current[conn.peer] = true;
          playTonalSound('P2P_HANDSHAKE');
+         
+         // Enviar perfil al conectar
+         conn.send({ type: 'MONITOR_HEARTBEAT', tutorSlot });
+
          const currentQueue = useStore.getState().offlineQueue;
          if (currentQueue.length > 0) {
             currentQueue.forEach(action => conn.send(action));
@@ -161,7 +273,13 @@ export default function MonitorDashboard() {
         if (data.type === 'USER_PROFILE') {
           setClients(prev => ({
             ...prev,
-            [conn.peer]: { ...(prev[conn.peer] || { lat: 0, lng: 0, lastSeen: now }), name: data.name, isOnline: true, avatar: data.avatar || null }
+            [conn.peer]: { 
+              ...(prev[conn.peer] || { lat: 0, lng: 0, lastSeen: now }), 
+              name: data.name, 
+              isOnline: true, 
+              avatar: data.avatar || null,
+              role: data.role || 'client'
+            }
           }));
         }
 
@@ -175,7 +293,17 @@ export default function MonitorDashboard() {
         if (data.type === 'LOCATION') {
           setClients((prev) => {
             if (Object.keys(prev).length === 0) setMapCenterTarget([data.lat, data.lng]);
-            return { ...prev, [conn.peer]: { ...(prev[conn.peer] || { avatar: null }), lat: data.lat, lng: data.lng, name: data.name, lastSeen: now, isOnline: true } };
+            return { 
+              ...prev, 
+              [conn.peer]: { 
+                ...(prev[conn.peer] || { avatar: null, role: 'client' }), 
+                lat: data.lat, 
+                lng: data.lng, 
+                name: data.name, 
+                lastSeen: now, 
+                isOnline: true 
+              } 
+            };
           });
 
           if (myLocation) {
@@ -227,6 +355,9 @@ export default function MonitorDashboard() {
            addMessage(data.message);
            showToast(`💬 Mensaje de ${data.message.senderName}`);
            playTonalSound('CHAT_RECEIVE');
+           if (tutorSlot === 'T1') {
+             broadcastAction(data);
+           }
         }
       });
 
@@ -266,11 +397,13 @@ export default function MonitorDashboard() {
   useEffect(() => {
     const interval = setInterval(() => {
        const now = Date.now();
+       
+       // 1. Check Clients Timeout (30s threshold)
        setClients(prev => {
           let changed = false;
           const updated = { ...prev };
           for (let id in updated) {
-             if (updated[id].isOnline && (now - updated[id].lastSeen > 15000)) {
+             if (updated[id].isOnline && (now - updated[id].lastSeen > 30000)) {
                 updated[id].isOnline = false;
                 changed = true;
                 showToast(`❌ Se perdió conexión con ${updated[id].name}`);
@@ -278,9 +411,31 @@ export default function MonitorDashboard() {
           }
           return changed ? updated : prev;
        });
+
+       // 2. T2 to T1 connection watchdog
+       if (tutorSlot === 'T2') {
+         if (!tutor1ConnRef.current || !tutor1ConnRef.current.open) {
+           connectToTutor1();
+         }
+       }
+
+       // 3. Heartbeat all clients to keep WebRTC connections alive
+       const peer = peerRef.current;
+       if (peer) {
+         for (const peerId in peer.connections) {
+           (peer.connections as any)[peerId].forEach((conn: any) => {
+              if (conn.open) {
+                conn.send({ type: 'MONITOR_HEARTBEAT', tutorSlot });
+              }
+           });
+         }
+       }
+       if (tutor1ConnRef.current && tutor1ConnRef.current.open) {
+         tutor1ConnRef.current.send({ type: 'MONITOR_HEARTBEAT', tutorSlot });
+       }
     }, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [tutorSlot, masterServerId]);
 
   const playSiren = () => {
     if (!(window as any).globalAudioCtx) {
@@ -297,7 +452,7 @@ export default function MonitorDashboard() {
     osc.frequency.setValueAtTime(400, ctx.currentTime);
     osc.frequency.linearRampToValueAtTime(800, ctx.currentTime + 0.4);
     osc.frequency.linearRampToValueAtTime(400, ctx.currentTime + 0.8);
-    setInterval(() => {
+    sirenIntervalRef.current = setInterval(() => {
       if (oscillatorRef.current) {
         osc.frequency.setValueAtTime(400, ctx.currentTime);
         osc.frequency.linearRampToValueAtTime(800, ctx.currentTime + 0.4);
@@ -313,6 +468,10 @@ export default function MonitorDashboard() {
   };
 
   const stopSiren = () => {
+    if (sirenIntervalRef.current) {
+      clearInterval(sirenIntervalRef.current);
+      sirenIntervalRef.current = null;
+    }
     if (oscillatorRef.current) {
       oscillatorRef.current.stop();
       oscillatorRef.current.disconnect();
@@ -329,6 +488,9 @@ export default function MonitorDashboard() {
             if (conn.open) conn.send(action);
          });
        }
+     }
+     if (tutor1ConnRef.current && tutor1ConnRef.current.open) {
+       tutor1ConnRef.current.send(action);
      }
   }
 
@@ -522,7 +684,7 @@ export default function MonitorDashboard() {
         {Object.entries(clients).map(([id, client]) => {
           if (client.lat === 0 && client.lng === 0) return null;
           return (
-            <Marker key={id} position={[client.lat, client.lng]} opacity={client.isOnline ? 1 : 0.5} icon={getAvatarIcon(id, client.avatar, client.isOnline, false)}>
+            <Marker key={id} position={[client.lat, client.lng]} opacity={client.isOnline ? 1 : 0.5} icon={getAvatarIcon(id, client.avatar, client.isOnline, client.role === 'monitor')}>
               <Popup><strong>{client.name}</strong> <br/>{client.isOnline ? 'GPS en tiempo real' : 'Última ubicación conocida'}</Popup>
             </Marker>
           );
@@ -559,7 +721,7 @@ export default function MonitorDashboard() {
 
       <div className="top-bar">
         <button className="icon-btn" onClick={() => setIsMenuOpen(true)}><Menu size={24} /></button>
-        <div className="top-bar-title">{userName} - Monitor</div>
+        <div className="top-bar-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}><span className={`led-indicator ${isOnline ? "led-green" : "led-red"}`} /><span>{userName} - {tutorSlot === "T2" ? "Tutor Secundario" : "Tutor Principal"}</span></div>
         <button className="icon-btn" onClick={() => setIsChatOpen(true)}><MessageSquare size={24} /></button>
       </div>
 
@@ -595,12 +757,14 @@ export default function MonitorDashboard() {
           ) : (
             Object.entries(clients).map(([id, c]) => (
               <div key={id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', background: c.isOnline ? 'rgba(79, 70, 229, 0.2)' : 'rgba(156, 163, 175, 0.2)', borderRadius: '12px', marginBottom: '8px' }}>
-                {c.avatar ? (
-                  <img src={c.avatar} alt={c.name} style={{ width: '32px', height: '32px', borderRadius: '50%', border: `2px solid ${c.isOnline ? '#4ade80' : '#9ca3af'}` }} />
-                ) : (
-                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: c.isOnline ? '#4ade80' : '#9ca3af' }}></div>
+                <span className={`led-indicator ${c.isOnline ? 'led-green' : 'led-red'}`} />
+                {c.avatar && (
+                  <img src={c.avatar} alt={c.name} style={{ width: '32px', height: '32px', borderRadius: '50%', border: '1px solid rgba(255,255,255,0.1)' }} />
                 )}
-                <span style={{ fontSize: '15px', fontWeight: 'bold', color: c.isOnline ? 'inherit' : '#9ca3af', flex: 1 }}>{c.name}</span>
+                <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                  <span style={{ fontSize: '15px', fontWeight: 'bold', color: c.isOnline ? 'inherit' : '#9ca3af' }}>{c.name}</span>
+                  <span style={{ fontSize: '11px', opacity: 0.6 }}>{c.role === 'monitor' ? 'Tutor' : 'Hijo'}</span>
+                </div>
                 {!c.isOnline && <span style={{ fontSize: '11px', opacity: 0.5 }}>Offline</span>}
                 {c.isOnline && (
                   <>
