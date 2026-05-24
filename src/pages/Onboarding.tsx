@@ -1,6 +1,7 @@
 import { useStore } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
+import developerLogo from '../assets/developer_logo.png';
 import { QRCode } from 'react-qr-code';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import { ShieldAlert, User, QrCode, Scan, ArrowLeft, Camera, RefreshCcw, Radar } from 'lucide-react';
@@ -299,11 +300,9 @@ export default function Onboarding() {
         )}
       </div>
       
-      <div style={{ marginTop: '24px', textAlign: 'center' }}>
-        <p style={{ fontSize: '12px', fontWeight: 'bold', color: 'rgba(255,255,255,0.9)', letterSpacing: '0.5px', margin: 0, textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>
-          🚀 Desarrollado por <span style={{ color: '#ec4899' }}>Adelio Gonzalez</span>
-        </p>
-        <p style={{ fontSize: '10px', opacity: 0.6, margin: '4px 0 0' }}>Seguridad Táctica P2P 🛡️</p>
+      <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+        <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '150px' }} />
+        <p style={{ fontSize: '10px', opacity: 0.6, margin: 0 }}>Seguridad Táctica P2P 🛡️</p>
       </div>
     </div>
   );

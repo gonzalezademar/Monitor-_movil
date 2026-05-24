@@ -544,3 +544,31 @@ body {
   color: white;
 }
 
+/* Logo del desarrollador con aura de resplandor */
+.dev-brand-logo {
+  height: auto;
+  transition: all 0.3s ease;
+  filter: drop-shadow(0 0 4px rgba(37, 99, 235, 0.4)) drop-shadow(0 0 10px rgba(249, 115, 22, 0.3));
+}
+.dev-brand-logo:hover {
+  filter: drop-shadow(0 0 8px rgba(37, 99, 235, 0.7)) drop-shadow(0 0 18px rgba(249, 115, 22, 0.6));
+  transform: scale(1.03);
+}
+
+/* Marca de agua flotante en las esquinas de los Dashboards */
+.floating-brand-logo {
+  position: absolute;
+  bottom: 80px;
+  right: 16px;
+  width: 90px;
+  z-index: 1000;
+  opacity: 0.55;
+  pointer-events: auto;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.2s;
+}
+.floating-brand-logo:hover {
+  opacity: 1;
+  transform: translateY(-2px);
+}
+

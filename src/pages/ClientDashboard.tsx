@@ -12,6 +12,7 @@ import 'leaflet/dist/leaflet.css';
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
+import developerLogo from '../assets/developer_logo.png';
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -31,8 +32,12 @@ function MapAutoCenter({ target }: { target: [number, number] | null }) {
 }
 
 export default function ClientDashboard() {
-  const { isSOSActive, setSOSActive, logout, userName, avatarBase64, masterServerId, setMyPeerId, messages, addMessage, offlineQueue, enqueueOfflineAction, cleanOldMessages, checkUpdates, updateAvailable, latestReleaseUrl } = useStore();
+  const { isSOSActive, setSOSActive, logout, userName, avatarBase64, masterServerId, setMyPeerId, messages, addMessage, offlineQueue, enqueueOfflineAction, cleanOldMessages, checkUpdates, updateAvailable, latestReleaseUrl, isCheckingUpdates, updateCheckResult, resetUpdateCheckResult } = useStore();
   const navigate = useNavigate();
+  const openMenu = () => {
+    resetUpdateCheckResult();
+    setIsMenuOpen(true);
+  };
 
   const sosTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -205,8 +210,7 @@ export default function ClientDashboard() {
     
     try {
       const conn = peerRef.current.connect(targetId, {
-        serialization: 'json',
-        reliable: true
+        serialization: 'json'
       });
       
       connsRef.current[slot] = conn;
@@ -371,7 +375,7 @@ export default function ClientDashboard() {
       }
 
       // Check Tutor 1
-      const isT1Active = connsRef.current.T1 && connsRef.current.T1.open && (now - lastPingT1Ref.current <= 20000);
+      const isT1Active = connsRef.current.T1 && connsRef.current.T1.open && (now - lastPingT1Ref.current <= 30000);
       if (!isT1Active) {
         if (connsRef.current.T1) {
           connsRef.current.T1.close();
@@ -400,7 +404,7 @@ export default function ClientDashboard() {
       }
       
       // Check Tutor 2
-      const isT2Active = connsRef.current.T2 && connsRef.current.T2.open && (now - lastPingT2Ref.current <= 20000);
+      const isT2Active = connsRef.current.T2 && connsRef.current.T2.open && (now - lastPingT2Ref.current <= 30000);
       if (!isT2Active) {
         if (connsRef.current.T2) {
           connsRef.current.T2.close();
@@ -802,7 +806,7 @@ export default function ClientDashboard() {
 
       {/* Top Bar Overlay */}
       <div className="top-bar">
-        <button className="icon-btn" onClick={() => setIsMenuOpen(true)} style={{ position: 'relative' }}>
+        <button className="icon-btn" onClick={openMenu} style={{ position: 'relative' }}>
           <Menu size={24} />
           {updateAvailable && (
             <span style={{ position: 'absolute', top: -2, right: -2, width: '10px', height: '10px', background: '#ec4899', borderRadius: '50%', border: '2px solid #0f172a', animation: 'dotPulse 1.5s infinite' }} />
@@ -839,12 +843,22 @@ export default function ClientDashboard() {
         </button>
       </div>
 
+      {/* Logo corporativo flotante en mapa (esquina inferior derecha) */}
+      <div className="floating-brand-logo">
+        <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '100%' }} />
+      </div>
+
       {/* Side Menu Overlay */}
       {isMenuOpen && <div className="side-menu-overlay" onClick={() => setIsMenuOpen(false)} />}
       <div className={`side-menu ${isMenuOpen ? 'open' : ''}`}>
-        <div className="menu-header">
-          <h2 style={{ fontSize: '18px', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}><ShieldAlert size={20} color="#ec4899" />Radar Familiar</h2>
-          <button className="icon-btn" onClick={() => setIsMenuOpen(false)} style={{ marginRight: '-8px' }}><X size={24} /></button>
+        <div className="menu-header" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+            <h2 style={{ fontSize: '18px', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}><ShieldAlert size={20} color="#ec4899" />Radar Familiar</h2>
+            <button className="icon-btn" onClick={() => setIsMenuOpen(false)} style={{ marginRight: '-8px' }}><X size={24} /></button>
+          </div>
+          <div style={{ paddingLeft: '4px', width: '100%' }}>
+            <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '120px' }} />
+          </div>
         </div>
 
         <div style={{ marginBottom: '32px' }}>
@@ -863,6 +877,38 @@ export default function ClientDashboard() {
             <Smartphone size={20} />
             <span style={{ fontSize: '14px' }}>Grupo: {masterServerId}</span>
           </div>
+        </div>
+
+        <div style={{ marginBottom: '32px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '20px' }}>
+          <p style={{ fontSize: '11px', opacity: 0.5, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>Mi Perfil y Aplicación</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', marginBottom: '12px' }}>
+            {avatarBase64 ? (
+              <img src={avatarBase64} alt={userName} style={{ width: '40px', height: '40px', borderRadius: '50%', border: '2px solid rgba(255,255,255,0.2)' }} />
+            ) : (
+              <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#4f46e5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{userName.charAt(0).toUpperCase()}</div>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: '14px', fontWeight: 'bold' }}>{userName}</span>
+              <span style={{ fontSize: '11px', opacity: 0.6 }}>Versión: v1.0.0</span>
+            </div>
+          </div>
+          
+          <button 
+            className="menu-item" 
+            onClick={() => checkUpdates()}
+            disabled={isCheckingUpdates}
+            style={{ width: '100%', display: 'flex', gap: '10px', alignItems: 'center', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}
+          >
+            <span>🔍</span>
+            <span>{isCheckingUpdates ? 'Buscando actualizaciones...' : 'Buscar Actualizaciones'}</span>
+          </button>
+          
+          {updateCheckResult === 'no_updates' && (
+            <p style={{ fontSize: '12px', color: '#4ade80', marginTop: '8px', paddingLeft: '8px' }}>✓ Tu aplicación está al día (v1.0.0)</p>
+          )}
+          {updateCheckResult === 'error' && (
+            <p style={{ fontSize: '12px', color: '#ef4444', marginTop: '8px', paddingLeft: '8px' }}>❌ Error al consultar actualizaciones.</p>
+          )}
         </div>
 
         {updateAvailable && (

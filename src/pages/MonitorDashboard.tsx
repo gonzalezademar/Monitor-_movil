@@ -12,6 +12,7 @@ import { Geolocation } from '@capacitor/geolocation';
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
+import developerLogo from '../assets/developer_logo.png';
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -46,8 +47,12 @@ export default function MonitorDashboard() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   
-  const { logout, masterServerId, fenceRadius, setFenceRadius, userName, avatarBase64, messages, addMessage, cleanOldMessages, tutorSlot, checkUpdates, updateAvailable, latestReleaseUrl } = useStore();
+  const { logout, masterServerId, fenceRadius, setFenceRadius, userName, avatarBase64, messages, addMessage, cleanOldMessages, tutorSlot, checkUpdates, updateAvailable, latestReleaseUrl, isCheckingUpdates, updateCheckResult, resetUpdateCheckResult } = useStore();
   const navigate = useNavigate();
+  const openMenu = () => {
+    resetUpdateCheckResult();
+    setIsMenuOpen(true);
+  };
   const [localRadius, setLocalRadius] = useState(fenceRadius);
 
   const confirmLogout = () => {
@@ -194,8 +199,7 @@ export default function MonitorDashboard() {
     console.log(`Tutor T2 conectándose a Tutor T1 (${masterServerId}-T1)...`);
     try {
       const conn = peerRef.current.connect(`${masterServerId}-T1`, {
-        serialization: 'json',
-        reliable: true
+        serialization: 'json'
       });
       tutor1ConnRef.current = conn;
 
@@ -433,29 +437,41 @@ export default function MonitorDashboard() {
       });
 
       conn.on('close', () => {
-        if (isConnectedRef.current[conn.peer]) {
-          playTonalSound('P2P_LOST');
-        }
-        isConnectedRef.current[conn.peer] = false;
-        setClients(prev => {
-          if (prev[conn.peer]) {
-            return { ...prev, [conn.peer]: { ...prev[conn.peer], isOnline: false } };
+        const peerId = conn.peer;
+        const activeConns = (peerRef.current?.connections as any)?.[peerId] || [];
+        const hasOpenConn = activeConns.some((c: any) => c.open);
+        
+        if (!hasOpenConn) {
+          if (isConnectedRef.current[peerId]) {
+            playTonalSound('P2P_LOST');
           }
-          return prev;
-        });
+          isConnectedRef.current[peerId] = false;
+          setClients(prev => {
+            if (prev[peerId]) {
+              return { ...prev, [peerId]: { ...prev[peerId], isOnline: false } };
+            }
+            return prev;
+          });
+        }
       });
 
       conn.on('error', () => {
-        if (isConnectedRef.current[conn.peer]) {
-          playTonalSound('P2P_LOST');
-        }
-        isConnectedRef.current[conn.peer] = false;
-        setClients(prev => {
-          if (prev[conn.peer]) {
-            return { ...prev, [conn.peer]: { ...prev[conn.peer], isOnline: false } };
+        const peerId = conn.peer;
+        const activeConns = (peerRef.current?.connections as any)?.[peerId] || [];
+        const hasOpenConn = activeConns.some((c: any) => c.open);
+        
+        if (!hasOpenConn) {
+          if (isConnectedRef.current[peerId]) {
+            playTonalSound('P2P_LOST');
           }
-          return prev;
-        });
+          isConnectedRef.current[peerId] = false;
+          setClients(prev => {
+            if (prev[peerId]) {
+              return { ...prev, [peerId]: { ...prev[peerId], isOnline: false } };
+            }
+            return prev;
+          });
+        }
       });
     });
 
@@ -858,7 +874,7 @@ export default function MonitorDashboard() {
       )}
 
       <div className="top-bar">
-        <button className="icon-btn" onClick={() => setIsMenuOpen(true)} style={{ position: 'relative' }}>
+        <button className="icon-btn" onClick={openMenu} style={{ position: 'relative' }}>
           <Menu size={24} />
           {updateAvailable && (
             <span style={{ position: 'absolute', top: -2, right: -2, width: '10px', height: '10px', background: '#ec4899', borderRadius: '50%', border: '2px solid #0f172a', animation: 'dotPulse 1.5s infinite' }} />
@@ -883,11 +899,21 @@ export default function MonitorDashboard() {
         </button>
       </div>
 
+      {/* Logo corporativo flotante en mapa (esquina inferior derecha) */}
+      <div className="floating-brand-logo">
+        <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '100%' }} />
+      </div>
+
       {isMenuOpen && <div className="side-menu-overlay" onClick={() => setIsMenuOpen(false)} />}
       <div className={`side-menu ${isMenuOpen ? 'open' : ''}`}>
-        <div className="menu-header">
-          <h2 style={{ fontSize: '18px', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}><ShieldAlert size={20} color="#ec4899" />Radar Familiar</h2>
-          <button className="icon-btn" onClick={() => setIsMenuOpen(false)} style={{ marginRight: '-8px' }}><X size={24} /></button>
+        <div className="menu-header" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+            <h2 style={{ fontSize: '18px', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}><ShieldAlert size={20} color="#ec4899" />Radar Familiar</h2>
+            <button className="icon-btn" onClick={() => setIsMenuOpen(false)} style={{ marginRight: '-8px' }}><X size={24} /></button>
+          </div>
+          <div style={{ paddingLeft: '4px', width: '100%' }}>
+            <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '120px' }} />
+          </div>
         </div>
         
         <div style={{ marginBottom: '32px' }}>
@@ -956,6 +982,38 @@ export default function MonitorDashboard() {
               style={{ width: '100%', accentColor: '#4f46e5' }}
             />
           </div>
+        </div>
+
+        <div style={{ marginBottom: '32px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '20px' }}>
+          <p style={{ fontSize: '11px', opacity: 0.5, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>Mi Perfil y Aplicación</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', marginBottom: '12px' }}>
+            {avatarBase64 ? (
+              <img src={avatarBase64} alt={userName} style={{ width: '40px', height: '40px', borderRadius: '50%', border: '2px solid rgba(255,255,255,0.2)' }} />
+            ) : (
+              <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#4f46e5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{userName.charAt(0).toUpperCase()}</div>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: '14px', fontWeight: 'bold' }}>{userName}</span>
+              <span style={{ fontSize: '11px', opacity: 0.6 }}>{tutorSlot === 'T2' ? 'Tutor Secundario' : 'Tutor Principal'} (v1.0.0)</span>
+            </div>
+          </div>
+          
+          <button 
+            className="menu-item" 
+            onClick={() => checkUpdates()}
+            disabled={isCheckingUpdates}
+            style={{ width: '100%', display: 'flex', gap: '10px', alignItems: 'center', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}
+          >
+            <span>🔍</span>
+            <span>{isCheckingUpdates ? 'Buscando actualizaciones...' : 'Buscar Actualizaciones'}</span>
+          </button>
+          
+          {updateCheckResult === 'no_updates' && (
+            <p style={{ fontSize: '12px', color: '#4ade80', marginTop: '8px', paddingLeft: '8px' }}>✓ Tu aplicación está al día (v1.0.0)</p>
+          )}
+          {updateCheckResult === 'error' && (
+            <p style={{ fontSize: '12px', color: '#ef4444', marginTop: '8px', paddingLeft: '8px' }}>❌ Error al consultar actualizaciones.</p>
+          )}
         </div>
 
         {updateAvailable && (

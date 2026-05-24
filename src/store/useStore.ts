@@ -41,7 +41,10 @@ interface AppState {
   appVersion: string;
   updateAvailable: string | null;
   latestReleaseUrl: string;
+  isCheckingUpdates: boolean;
+  updateCheckResult: 'no_updates' | 'found' | 'error' | null;
   checkUpdates: () => Promise<void>;
+  resetUpdateCheckResult: () => void;
 }
 
 
@@ -80,13 +83,23 @@ export const useStore = create<AppState>()(
       appVersion: '1.0.0',
       updateAvailable: null,
       latestReleaseUrl: '',
+      isCheckingUpdates: false,
+      updateCheckResult: null,
+      resetUpdateCheckResult: () => set({ updateCheckResult: null }),
       checkUpdates: async () => {
+        set({ isCheckingUpdates: true, updateCheckResult: null });
         try {
           const response = await fetch('https://api.github.com/repos/gonzalezademar/Monitor-_movil/releases/latest');
-          if (!response.ok) return;
+          if (!response.ok) {
+            set({ isCheckingUpdates: false, updateCheckResult: 'error' });
+            return;
+          }
           const data = await response.json();
           const remoteVersion = data.tag_name;
-          if (!remoteVersion) return;
+          if (!remoteVersion) {
+            set({ isCheckingUpdates: false, updateCheckResult: 'error' });
+            return;
+          }
           
           const local = '1.0.0';
           const cleanLocal = local.replace(/^v/, '');
@@ -110,11 +123,20 @@ export const useStore = create<AppState>()(
           if (isNewer) {
             set({ 
               updateAvailable: remoteVersion,
-              latestReleaseUrl: data.html_url || 'https://github.com/gonzalezademar/Monitor-_movil/releases/latest'
+              latestReleaseUrl: data.html_url || 'https://github.com/gonzalezademar/Monitor-_movil/releases/latest',
+              updateCheckResult: 'found',
+              isCheckingUpdates: false
+            });
+          } else {
+            set({ 
+              updateAvailable: null,
+              updateCheckResult: 'no_updates',
+              isCheckingUpdates: false
             });
           }
         } catch (e) {
           console.log('Error checking updates:', e);
+          set({ isCheckingUpdates: false, updateCheckResult: 'error' });
         }
       }
     }),
