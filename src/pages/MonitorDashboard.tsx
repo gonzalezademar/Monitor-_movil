@@ -46,7 +46,7 @@ export default function MonitorDashboard() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   
-  const { logout, masterServerId, fenceRadius, setFenceRadius, userName, avatarBase64, messages, addMessage, cleanOldMessages, tutorSlot } = useStore();
+  const { logout, masterServerId, fenceRadius, setFenceRadius, userName, avatarBase64, messages, addMessage, cleanOldMessages, tutorSlot, checkUpdates, updateAvailable, latestReleaseUrl } = useStore();
   const navigate = useNavigate();
   const [localRadius, setLocalRadius] = useState(fenceRadius);
 
@@ -139,6 +139,10 @@ export default function MonitorDashboard() {
     setToasts(prev => [...prev, { id, msg }]);
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 6000);
   };
+
+  useEffect(() => {
+    checkUpdates();
+  }, [checkUpdates]);
 
   useEffect(() => {
     let watchId: string | null = null;
@@ -854,7 +858,12 @@ export default function MonitorDashboard() {
       )}
 
       <div className="top-bar">
-        <button className="icon-btn" onClick={() => setIsMenuOpen(true)}><Menu size={24} /></button>
+        <button className="icon-btn" onClick={() => setIsMenuOpen(true)} style={{ position: 'relative' }}>
+          <Menu size={24} />
+          {updateAvailable && (
+            <span style={{ position: 'absolute', top: -2, right: -2, width: '10px', height: '10px', background: '#ec4899', borderRadius: '50%', border: '2px solid #0f172a', animation: 'dotPulse 1.5s infinite' }} />
+          )}
+        </button>
         <div className="top-bar-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}><span className={`led-indicator ${isOnline ? "led-green" : "led-red"}`} /><span>{userName} - {tutorSlot === "T2" ? "Tutor Secundario" : "Tutor Principal"}</span></div>
         <button className="icon-btn" onClick={() => setIsChatOpen(true)}><MessageSquare size={24} /></button>
       </div>
@@ -948,6 +957,18 @@ export default function MonitorDashboard() {
             />
           </div>
         </div>
+
+        {updateAvailable && (
+          <div style={{ margin: '10px', padding: '12px', background: 'rgba(236, 72, 153, 0.15)', border: '1px solid rgba(236, 72, 153, 0.3)', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <span style={{ fontSize: '13px', color: '#fbcfe8', fontWeight: 'bold' }}>📢 Actualización pendiente ({updateAvailable})</span>
+            <button 
+              onClick={() => window.open(latestReleaseUrl, '_blank')} 
+              style={{ background: '#ec4899', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', textAlign: 'center' }}
+            >
+              Descargar APK ahora
+            </button>
+          </div>
+        )}
 
         <div style={{ marginTop: 'auto' }}><button className="menu-item" onClick={() => { setIsUnlinkModalOpen(true); setUnlinkConfirmName(''); }} style={{ color: '#fca5a5' }}><LogOut size={18} />Desvincular Dispositivo</button></div>
       </div>

@@ -31,7 +31,7 @@ function MapAutoCenter({ target }: { target: [number, number] | null }) {
 }
 
 export default function ClientDashboard() {
-  const { isSOSActive, setSOSActive, logout, userName, avatarBase64, masterServerId, setMyPeerId, messages, addMessage, offlineQueue, enqueueOfflineAction, cleanOldMessages } = useStore();
+  const { isSOSActive, setSOSActive, logout, userName, avatarBase64, masterServerId, setMyPeerId, messages, addMessage, offlineQueue, enqueueOfflineAction, cleanOldMessages, checkUpdates, updateAvailable, latestReleaseUrl } = useStore();
   const navigate = useNavigate();
 
   const sosTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -98,6 +98,10 @@ export default function ClientDashboard() {
   const releaseWakeLock = () => {
     if (wakeLockRef.current) { wakeLockRef.current.release(); wakeLockRef.current = null; }
   };
+
+  useEffect(() => {
+    checkUpdates();
+  }, [checkUpdates]);
 
   useEffect(() => {
     return () => {
@@ -798,7 +802,12 @@ export default function ClientDashboard() {
 
       {/* Top Bar Overlay */}
       <div className="top-bar">
-        <button className="icon-btn" onClick={() => setIsMenuOpen(true)}><Menu size={24} /></button>
+        <button className="icon-btn" onClick={() => setIsMenuOpen(true)} style={{ position: 'relative' }}>
+          <Menu size={24} />
+          {updateAvailable && (
+            <span style={{ position: 'absolute', top: -2, right: -2, width: '10px', height: '10px', background: '#ec4899', borderRadius: '50%', border: '2px solid #0f172a', animation: 'dotPulse 1.5s infinite' }} />
+          )}
+        </button>
         <div className="top-bar-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span className={`led-indicator ${isConnected ? 'led-green' : 'led-red'}`} /><span>{userName} - Rastreable</span></div>
         <button className="icon-btn" onClick={() => setIsChatOpen(true)}>
           <MessageSquare size={24} />
@@ -855,6 +864,18 @@ export default function ClientDashboard() {
             <span style={{ fontSize: '14px' }}>Grupo: {masterServerId}</span>
           </div>
         </div>
+
+        {updateAvailable && (
+          <div style={{ margin: '10px', padding: '12px', background: 'rgba(236, 72, 153, 0.15)', border: '1px solid rgba(236, 72, 153, 0.3)', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <span style={{ fontSize: '13px', color: '#fbcfe8', fontWeight: 'bold' }}>📢 Actualización pendiente ({updateAvailable})</span>
+            <button 
+              onClick={() => window.open(latestReleaseUrl, '_blank')} 
+              style={{ background: '#ec4899', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', textAlign: 'center' }}
+            >
+              Descargar APK ahora
+            </button>
+          </div>
+        )}
 
         <button className="menu-item" onClick={handleLogout} style={{ marginTop: 'auto', display: 'flex', gap: '12px', color: '#fb7185' }}>
           <LogOut size={18} />

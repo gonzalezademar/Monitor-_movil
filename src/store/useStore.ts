@@ -38,7 +38,12 @@ interface AppState {
   clearOfflineQueue: () => void;
   
   logout: () => void;
+  appVersion: string;
+  updateAvailable: string | null;
+  latestReleaseUrl: string;
+  checkUpdates: () => Promise<void>;
 }
+
 
 export const useStore = create<AppState>()(
   persist(
@@ -71,7 +76,47 @@ export const useStore = create<AppState>()(
       enqueueOfflineAction: (action) => set((state) => ({ offlineQueue: [...state.offlineQueue, action] })),
       clearOfflineQueue: () => set({ offlineQueue: [] }),
 
-      logout: () => set({ role: null, userName: '', avatarBase64: null, masterServerId: null, myPeerId: null, familyCode: null, tutorSlot: null, isSOSActive: false, fenceRadius: 100, messages: [], offlineQueue: [] })
+      logout: () => set({ role: null, userName: '', avatarBase64: null, masterServerId: null, myPeerId: null, familyCode: null, tutorSlot: null, isSOSActive: false, fenceRadius: 100, messages: [], offlineQueue: [] }),
+      appVersion: '1.0.0',
+      updateAvailable: null,
+      latestReleaseUrl: '',
+      checkUpdates: async () => {
+        try {
+          const response = await fetch('https://api.github.com/repos/gonzalezademar/Monitor-_movil/releases/latest');
+          if (!response.ok) return;
+          const data = await response.json();
+          const remoteVersion = data.tag_name;
+          if (!remoteVersion) return;
+          
+          const local = '1.0.0';
+          const cleanLocal = local.replace(/^v/, '');
+          const cleanRemote = remoteVersion.replace(/^v/, '');
+          
+          const localParts = cleanLocal.split('.').map(Number);
+          const remoteParts = cleanRemote.split('.').map(Number);
+          
+          let isNewer = false;
+          for (let i = 0; i < Math.max(localParts.length, remoteParts.length); i++) {
+            const locVal = localParts[i] || 0;
+            const remVal = remoteParts[i] || 0;
+            if (remVal > locVal) {
+              isNewer = true;
+              break;
+            } else if (remVal < locVal) {
+              break;
+            }
+          }
+          
+          if (isNewer) {
+            set({ 
+              updateAvailable: remoteVersion,
+              latestReleaseUrl: data.html_url || 'https://github.com/gonzalezademar/Monitor-_movil/releases/latest'
+            });
+          }
+        } catch (e) {
+          console.log('Error checking updates:', e);
+        }
+      }
     }),
     {
       name: 'radar-storage',
