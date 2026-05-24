@@ -70,6 +70,11 @@ export default function ClientDashboard() {
   
   const lastPingT1Ref = useRef<number>(Date.now());
   const lastPingT2Ref = useRef<number>(Date.now());
+  const disconnectedAtT1Ref = useRef<number | null>(null);
+  const disconnectedAtT2Ref = useRef<number | null>(null);
+  const lastAttemptT1Ref = useRef<number>(0);
+  const lastAttemptT2Ref = useRef<number>(0);
+
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -80,12 +85,8 @@ export default function ClientDashboard() {
   const myIconRef = useRef(L.divIcon({ className: 'custom-avatar-marker', html: avatarBase64 ? `<div style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid #4ade80;box-shadow:0 0 10px rgba(74,222,128,0.5);"><img src="${avatarBase64}" style="width:100%;height:100%;object-fit:cover;" /></div>` : `<div style="width:24px;height:24px;background:#4ade80;border-radius:50%;border:2px solid white;"></div>`, iconSize: [36, 36], iconAnchor: [18, 18] }));
   const monitorIconCache = useRef<Record<string, L.DivIcon>>({});
   
-  // Anti-Spam Reconnection Backoff
-  const reconnectAttemptsT1Ref = useRef(0);
-  const reconnectAttemptsT2Ref = useRef(0);
-  const lastReconnectT1Ref = useRef(0);
-  const lastReconnectT2Ref = useRef(0);
   const [gpsError, setGpsError] = useState<string | null>(null);
+
 
   const acquireWakeLock = async () => {
     try {
@@ -195,23 +196,6 @@ export default function ClientDashboard() {
     const existingConn = connsRef.current[slot];
     if (existingConn && existingConn.open) return;
 
-    const now = Date.now();
-    const attempts = slot === 'T1' ? reconnectAttemptsT1Ref.current : reconnectAttemptsT2Ref.current;
-    const lastRec = slot === 'T1' ? lastReconnectT1Ref.current : lastReconnectT2Ref.current;
-    const delay = Math.min(5000 * Math.pow(2, attempts), 60000);
-
-    if (now - lastRec < delay && attempts > 0) {
-      return; 
-    }
-
-    if (slot === 'T1') {
-      lastReconnectT1Ref.current = now;
-      reconnectAttemptsT1Ref.current += 1;
-    } else {
-      lastReconnectT2Ref.current = now;
-      reconnectAttemptsT2Ref.current += 1;
-    }
-
     const targetId = `${masterServerId}-${slot}`;
     console.log(`Conectando a Tutor ${slot} (${targetId})...`);
     
@@ -227,17 +211,20 @@ export default function ClientDashboard() {
         console.log(`Conectado a Tutor ${slot}!`);
         if (slot === 'T1') {
           setT1Connected(true);
-          reconnectAttemptsT1Ref.current = 0;
+          disconnectedAtT1Ref.current = null;
           lastPingT1Ref.current = Date.now();
         } else {
           setT2Connected(true);
-          reconnectAttemptsT2Ref.current = 0;
+          disconnectedAtT2Ref.current = null;
           lastPingT2Ref.current = Date.now();
         }
         updateGlobalConnectionStatus();
         playTonalSound('P2P_HANDSHAKE');
 
         conn.send({ type: 'USER_PROFILE', name: userName, avatar: avatarBase64 });
+        
+        // CHAT SYNC: Sincronizar mensajes pendientes al conectar
+        conn.send({ type: 'CHAT_SYNC', messages: useStore.getState().messages });
 
         const currentQueue = useStore.getState().offlineQueue;
         if (currentQueue.length > 0) {
@@ -288,6 +275,15 @@ export default function ClientDashboard() {
            addMessage(data.message);
            playTonalSound('CHAT_RECEIVE');
         }
+        if (data.type === 'CHAT_SYNC_CONFIRM') {
+           const clientMessages = useStore.getState().messages;
+           const consolidatedMessages = data.messages || [];
+           const combined = [...clientMessages, ...consolidatedMessages];
+           const uniqueMessages = Array.from(new Map(combined.map(m => [m.id, m])).values())
+             .sort((a, b) => a.timestamp - b.timestamp)
+             .slice(-15);
+           useStore.setState({ messages: uniqueMessages });
+        }
 
         if (data.type === 'SILENT_PING' || data.type === 'GHOST_MODE') {
            Geolocation.getCurrentPosition({ enableHighAccuracy: true }).then(pos => {
@@ -321,6 +317,7 @@ export default function ClientDashboard() {
       console.error(`Error al iniciar conexión con ${targetId}:`, e);
     }
   };
+
 
   const setupPeer = () => {
     if (peerRef.current && !peerRef.current.destroyed) {
@@ -370,23 +367,61 @@ export default function ClientDashboard() {
       }
 
       // Check Tutor 1
-      if (!connsRef.current.T1 || !connsRef.current.T1.open || (now - lastPingT1Ref.current > 20000)) {
+      const isT1Active = connsRef.current.T1 && connsRef.current.T1.open && (now - lastPingT1Ref.current <= 20000);
+      if (!isT1Active) {
         if (connsRef.current.T1) {
           connsRef.current.T1.close();
           connsRef.current.T1 = null;
         }
         setT1Connected(false);
-        connectToTutor('T1');
+        
+        if (disconnectedAtT1Ref.current === null) {
+          disconnectedAtT1Ref.current = now;
+        }
+        
+        const elapsed = now - disconnectedAtT1Ref.current;
+        let interval = 5000;
+        if (elapsed > 600000) { // 10 minutos
+          interval = 60000;
+        } else if (elapsed > 180000) { // 3 minutos
+          interval = 30000;
+        }
+        
+        if (now - lastAttemptT1Ref.current >= interval) {
+          lastAttemptT1Ref.current = now;
+          connectToTutor('T1');
+        }
+      } else {
+        disconnectedAtT1Ref.current = null;
       }
       
       // Check Tutor 2
-      if (!connsRef.current.T2 || !connsRef.current.T2.open || (now - lastPingT2Ref.current > 20000)) {
+      const isT2Active = connsRef.current.T2 && connsRef.current.T2.open && (now - lastPingT2Ref.current <= 20000);
+      if (!isT2Active) {
         if (connsRef.current.T2) {
           connsRef.current.T2.close();
           connsRef.current.T2 = null;
         }
         setT2Connected(false);
-        connectToTutor('T2');
+        
+        if (disconnectedAtT2Ref.current === null) {
+          disconnectedAtT2Ref.current = now;
+        }
+        
+        const elapsed = now - disconnectedAtT2Ref.current;
+        let interval = 5000;
+        if (elapsed > 600000) { // 10 minutos
+          interval = 60000;
+        } else if (elapsed > 180000) { // 3 minutos
+          interval = 30000;
+        }
+        
+        if (now - lastAttemptT2Ref.current >= interval) {
+          lastAttemptT2Ref.current = now;
+          connectToTutor('T2');
+        }
+      } else {
+        disconnectedAtT2Ref.current = null;
       }
       
       updateGlobalConnectionStatus();
@@ -397,6 +432,7 @@ export default function ClientDashboard() {
       if (peerRef.current) peerRef.current.destroy();
     };
   }, [masterServerId, setMyPeerId, userName, addMessage]);
+
 
   // Geolocation
   useEffect(() => {

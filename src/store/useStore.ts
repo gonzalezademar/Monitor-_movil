@@ -88,6 +88,9 @@ export const useStore = create<AppState>()(
 
 export const playTonalSound = (type: 'CHAT_RECEIVE' | 'P2P_HANDSHAKE' | 'P2P_LOST' | 'GEOFENCE_BREACH' | 'PTT_START') => {
   try {
+    if (!(window as any).globalAudioCtx) {
+      (window as any).globalAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
     const ctx = (window as any).globalAudioCtx;
     if (!ctx) return;
     
@@ -165,3 +168,27 @@ export const playTonalSound = (type: 'CHAT_RECEIVE' | 'P2P_HANDSHAKE' | 'P2P_LOS
     console.warn("Could not play tonal sound:", e);
   }
 };
+
+// Desbloqueador nativo en interacción de usuario para Web Audio API
+const unlockAudio = () => {
+  if (!(window as any).globalAudioCtx) {
+    (window as any).globalAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+  }
+  const ctx = (window as any).globalAudioCtx;
+  if (ctx && ctx.state === 'suspended') {
+    ctx.resume().then(() => {
+      document.removeEventListener('click', unlockAudio);
+      document.removeEventListener('touchstart', unlockAudio);
+    }).catch((e: any) => console.warn("Failed to resume AudioContext:", e));
+
+  } else if (ctx && ctx.state === 'running') {
+    document.removeEventListener('click', unlockAudio);
+    document.removeEventListener('touchstart', unlockAudio);
+  }
+};
+
+if (typeof window !== 'undefined') {
+  document.addEventListener('click', unlockAudio);
+  document.addEventListener('touchstart', unlockAudio);
+}
+

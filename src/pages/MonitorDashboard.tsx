@@ -88,6 +88,8 @@ export default function MonitorDashboard() {
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [mapTheme, setMapTheme] = useState<'dark' | 'light'>('dark');
   const [activeRemoteAlarms, setActiveRemoteAlarms] = useState<Record<string, boolean>>({});
+  const [trackingTargetId, setTrackingTargetId] = useState<string>('me');
+
   
   // Caché de íconos para evitar parpadeos masivos del mapa
   const markerIconCache = useRef<Record<string, L.DivIcon>>({});
@@ -162,7 +164,24 @@ export default function MonitorDashboard() {
     }
   }, [avatarBase64, cleanOldMessages]);
 
+  // Auto-centrado reactivo según el objetivo de seguimiento
+  useEffect(() => {
+    if (!trackingTargetId) return;
+    if (trackingTargetId === 'me') {
+      if (myLocation) {
+        setMapCenterTarget(myLocation);
+      }
+    } else {
+      const target = clients[trackingTargetId];
+      if (target && target.lat !== 0 && target.lng !== 0) {
+        setMapCenterTarget([target.lat, target.lng]);
+      }
+    }
+  }, [trackingTargetId, clients, myLocation]);
+
   const tutor1ConnRef = useRef<any>(null);
+  const tutor1DisconnectedAtRef = useRef<number | null>(null);
+  const tutor1LastAttemptRef = useRef<number>(0);
 
   const connectToTutor1 = () => {
     if (!peerRef.current || peerRef.current.destroyed || peerRef.current.disconnected) return;
@@ -178,7 +197,11 @@ export default function MonitorDashboard() {
 
       conn.on('open', () => {
         console.log("¡Conectado exitosamente con Tutor T1!");
+        tutor1DisconnectedAtRef.current = null;
         conn.send({ type: 'USER_PROFILE', name: userName, avatar: avatarBase64, role: 'monitor' });
+        
+        // CHAT SYNC: Sincronizar historial con Tutor 1 al conectar
+        conn.send({ type: 'CHAT_SYNC', messages: useStore.getState().messages });
       });
 
       conn.on('data', (data: any) => {
@@ -191,6 +214,25 @@ export default function MonitorDashboard() {
           addMessage(data.message);
           showToast(`💬 Mensaje de ${data.message.senderName}`);
           playTonalSound('CHAT_RECEIVE');
+        }
+        if (data.type === 'CHAT_SYNC') {
+          const monitorMessages = useStore.getState().messages;
+          const clientMessages = data.messages || [];
+          const combined = [...monitorMessages, ...clientMessages];
+          const uniqueMessages = Array.from(new Map(combined.map(m => [m.id, m])).values())
+            .sort((a, b) => a.timestamp - b.timestamp)
+            .slice(-15);
+          useStore.setState({ messages: uniqueMessages });
+          conn.send({ type: 'CHAT_SYNC_CONFIRM', messages: uniqueMessages });
+        }
+        if (data.type === 'CHAT_SYNC_CONFIRM') {
+          const monitorMessages = useStore.getState().messages;
+          const consolidatedMessages = data.messages || [];
+          const combined = [...monitorMessages, ...consolidatedMessages];
+          const uniqueMessages = Array.from(new Map(combined.map(m => [m.id, m])).values())
+            .sort((a, b) => a.timestamp - b.timestamp)
+            .slice(-15);
+          useStore.setState({ messages: uniqueMessages });
         }
         if (data.type === 'SOS_ALERT') {
           setAlarmActive({ active: true, originName: data.name });
@@ -227,6 +269,7 @@ export default function MonitorDashboard() {
       console.error("Error al iniciar conexión con Tutor T1:", e);
     }
   };
+
 
   // P2P Setup
   useEffect(() => {
@@ -359,6 +402,30 @@ export default function MonitorDashboard() {
              broadcastAction(data);
            }
         }
+        if (data.type === 'CHAT_SYNC') {
+          const monitorMessages = useStore.getState().messages;
+          const clientMessages = data.messages || [];
+          const combined = [...monitorMessages, ...clientMessages];
+          const uniqueMessages = Array.from(new Map(combined.map(m => [m.id, m])).values())
+            .sort((a, b) => a.timestamp - b.timestamp)
+            .slice(-15);
+          useStore.setState({ messages: uniqueMessages });
+          conn.send({ type: 'CHAT_SYNC_CONFIRM', messages: uniqueMessages });
+          
+          if (tutorSlot === 'T1') {
+            broadcastAction({ type: 'CHAT_SYNC_CONFIRM', messages: uniqueMessages });
+          }
+        }
+        if (data.type === 'CHAT_SYNC_CONFIRM') {
+          const monitorMessages = useStore.getState().messages;
+          const consolidatedMessages = data.messages || [];
+          const combined = [...monitorMessages, ...consolidatedMessages];
+          const uniqueMessages = Array.from(new Map(combined.map(m => [m.id, m])).values())
+            .sort((a, b) => a.timestamp - b.timestamp)
+            .slice(-15);
+          useStore.setState({ messages: uniqueMessages });
+        }
+
       });
 
       conn.on('close', () => {
@@ -396,43 +463,66 @@ export default function MonitorDashboard() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-       const now = Date.now();
-       
-       // 1. Check Clients Timeout (30s threshold)
-       setClients(prev => {
-          let changed = false;
-          const updated = { ...prev };
-          for (let id in updated) {
-             if (updated[id].isOnline && (now - updated[id].lastSeen > 30000)) {
-                updated[id].isOnline = false;
-                changed = true;
-                showToast(`❌ Se perdió conexión con ${updated[id].name}`);
-             }
-          }
-          return changed ? updated : prev;
-       });
-
-       // 2. T2 to T1 connection watchdog
-       if (tutorSlot === 'T2') {
-         if (!tutor1ConnRef.current || !tutor1ConnRef.current.open) {
-           connectToTutor1();
-         }
-       }
-
-       // 3. Heartbeat all clients to keep WebRTC connections alive
-       const peer = peerRef.current;
-       if (peer) {
-         for (const peerId in peer.connections) {
-           (peer.connections as any)[peerId].forEach((conn: any) => {
-              if (conn.open) {
-                conn.send({ type: 'MONITOR_HEARTBEAT', tutorSlot });
+        const now = Date.now();
+        
+        // 1. Check Clients Timeout (30s threshold)
+        setClients(prev => {
+           let changed = false;
+           const updated = { ...prev };
+           for (let id in updated) {
+              if (updated[id].isOnline && (now - updated[id].lastSeen > 30000)) {
+                 updated[id].isOnline = false;
+                 changed = true;
+                 showToast(`❌ Se perdió conexión con ${updated[id].name}`);
               }
-           });
-         }
-       }
-       if (tutor1ConnRef.current && tutor1ConnRef.current.open) {
-         tutor1ConnRef.current.send({ type: 'MONITOR_HEARTBEAT', tutorSlot });
-       }
+           }
+           return changed ? updated : prev;
+        });
+
+        // 2. T2 to T1 connection watchdog
+        if (tutorSlot === 'T2') {
+          const isT1Active = tutor1ConnRef.current && tutor1ConnRef.current.open;
+          if (!isT1Active) {
+            if (tutor1ConnRef.current) {
+              tutor1ConnRef.current.close();
+              tutor1ConnRef.current = null;
+            }
+            
+            if (tutor1DisconnectedAtRef.current === null) {
+              tutor1DisconnectedAtRef.current = now;
+            }
+            
+            const elapsed = now - tutor1DisconnectedAtRef.current;
+            let interval = 5000;
+            if (elapsed > 600000) { // 10 minutos
+              interval = 60000;
+            } else if (elapsed > 180000) { // 3 minutos
+              interval = 30000;
+            }
+            
+            if (now - tutor1LastAttemptRef.current >= interval) {
+              tutor1LastAttemptRef.current = now;
+              connectToTutor1();
+            }
+          } else {
+            tutor1DisconnectedAtRef.current = null;
+          }
+        }
+
+        // 3. Heartbeat all clients to keep WebRTC connections alive
+        const peer = peerRef.current;
+        if (peer) {
+          for (const peerId in peer.connections) {
+            (peer.connections as any)[peerId].forEach((conn: any) => {
+               if (conn.open) {
+                 conn.send({ type: 'MONITOR_HEARTBEAT', tutorSlot });
+               }
+            });
+          }
+        }
+        if (tutor1ConnRef.current && tutor1ConnRef.current.open) {
+          tutor1ConnRef.current.send({ type: 'MONITOR_HEARTBEAT', tutorSlot });
+        }
     }, 5000);
     return () => clearInterval(interval);
   }, [tutorSlot, masterServerId]);
@@ -698,6 +788,50 @@ export default function MonitorDashboard() {
       >
         {mapTheme === 'dark' ? <Sun size={24} /> : <Moon size={24} />}
       </button>
+
+      {/* Panel flotante de Avatares para Seguimiento */}
+      <div className="map-avatars-container">
+        <button 
+          className={`map-avatar-btn monitor ${trackingTargetId === 'me' ? 'active' : ''}`}
+          onClick={() => {
+            setTrackingTargetId('me');
+            if (myLocation) {
+              setMapCenterTarget(myLocation);
+            }
+          }}
+          title="Centrar en mí"
+        >
+          {avatarBase64 ? (
+            <img src={avatarBase64} alt="Yo" />
+          ) : (
+            <div className="map-avatar-placeholder">{userName.charAt(0).toUpperCase()}</div>
+          )}
+        </button>
+
+        {Object.entries(clients).map(([id, c]) => {
+          const isTargetActive = trackingTargetId === id;
+          return (
+            <button
+              key={id}
+              className={`map-avatar-btn ${isTargetActive ? 'active' : ''} ${c.role === 'monitor' ? 'monitor' : ''}`}
+              onClick={() => {
+                setTrackingTargetId(id);
+                if (c.lat !== 0 && c.lng !== 0) {
+                  setMapCenterTarget([c.lat, c.lng]);
+                }
+              }}
+              title={`Seguir a ${c.name}`}
+            >
+              {c.avatar ? (
+                <img src={c.avatar} alt={c.name} style={{ opacity: c.isOnline ? 1 : 0.5 }} />
+              ) : (
+                <div className="map-avatar-placeholder" style={{ opacity: c.isOnline ? 1 : 0.5 }}>{c.name.charAt(0).toUpperCase()}</div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
 
       {/* TOASTS */}
       <div style={{ position: 'absolute', top: 80, left: 20, right: 20, zIndex: 1100, display: 'flex', flexDirection: 'column', gap: '8px' }}>
