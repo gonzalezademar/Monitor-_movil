@@ -13,6 +13,7 @@
     "@capacitor/android": "^8.3.4",
     "@capacitor/core": "^8.3.4",
     "@capacitor/geolocation": "^8.2.0",
+    "@supabase/supabase-js": "^2.106.1",
     "@yudiel/react-qr-scanner": "^2.6.0",
     "leaflet": "^1.9.4",
     "localforage": "^1.10.0",

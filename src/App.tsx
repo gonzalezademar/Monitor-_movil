@@ -6,7 +6,7 @@ import { useStore } from './store/useStore';
 import { useEffect, useState } from 'react';
 
 function App() {
-  const role = useStore((state) => state.role);
+  const role = useStore((state: any) => state.role);
 
   // FIX: Protección de hidratación del store.
   // Zustand persist con localStorage es síncrono, pero esta barrera

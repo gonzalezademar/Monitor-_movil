@@ -4,136 +4,165 @@ import { useState, useEffect, useRef } from 'react';
 import developerLogo from '../assets/developer_logo.png';
 import { QRCode } from 'react-qr-code';
 import { Scanner } from '@yudiel/react-qr-scanner';
-import { ShieldAlert, User, QrCode, Scan, ArrowLeft, Camera, RefreshCcw, Radar } from 'lucide-react';
+import { ShieldAlert, User, QrCode, ArrowLeft, Camera, RefreshCcw, Radar, Mail, Lock, Eye, EyeOff, Clock, MapPin } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
 
 export default function Onboarding() {
-  const { setRole, setUserName, setMasterServerId, setFamilyCode, setTutorSlot, role } = useStore();
+  const { role, familyCode, signIn, signUp, joinFamily, loadSession, resetPassword } = useStore();
   const navigate = useNavigate();
-  const [nameInput, setNameInput] = useState('');
-  const [nameError, setNameError] = useState('');
-  const [cameraError, setCameraError] = useState('');
-  const [step, setStep] = useState(1);
-  const [tempRole, setTempRole] = useState<'monitor' | 'secondary_monitor' | 'client' | null>(null);
-  const [scanError, setScanError] = useState(false);
-  const [avatarInput, setAvatarInput] = useState<string | null>(null);
 
-  // ESTABILIDAD: refs para cleanup de timers — evita fugas y estado huérfano al desmontar
-  const scanErrorTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mode state: 'welcome' | 'login' | 'signup' | 'forgot' | 'scan' | 'show_qr'
+  const [mode, setMode] = useState<'welcome' | 'login' | 'signup' | 'forgot' | 'scan' | 'show_qr'>('welcome');
+  
+  // Input fields
+  const [emailInput, setEmailInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [nameInput, setNameInput] = useState('');
+  const [avatarInput, setAvatarInput] = useState<string | null>(null);
+  const [selectedRole, setSelectedRole] = useState<'monitor' | 'client'>('monitor');
+
+  // Error and UI state
+  const [formError, setFormError] = useState('');
+  const [cameraError, setCameraError] = useState('');
+  const [scanError, setScanError] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+
+  // Refs for timers
+  const scanErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cameraErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [serverCode] = useState(() => 'RADAR-' + Math.random().toString(36).substring(2, 9).toUpperCase());
+  // Load existing session on mount
+  useEffect(() => {
+    loadSession();
+  }, [loadSession]);
 
-  // Limpieza de todos los timers al desmontar
+  // Redirect if logged in and profile matches a role
+  useEffect(() => {
+    if (role === 'monitor') {
+      navigate('/monitor');
+    } else if (role === 'client') {
+      if (familyCode) {
+        navigate('/client');
+      } else {
+        setMode('scan');
+      }
+    }
+  }, [role, familyCode, navigate]);
+
+  // Cleanup timers on unmount
   useEffect(() => {
     return () => {
-      if (scanErrorTimerRef.current)   clearTimeout(scanErrorTimerRef.current);
+      if (scanErrorTimerRef.current) clearTimeout(scanErrorTimerRef.current);
       if (cameraErrorTimerRef.current) clearTimeout(cameraErrorTimerRef.current);
     };
   }, []);
 
-  useEffect(() => {
-    if (role === 'monitor') navigate('/monitor');
-    if (role === 'client') navigate('/client');
-  }, [role, navigate]);
-
-  const handleSelectRole = async (selectedRole: 'monitor' | 'secondary_monitor' | 'client') => {
-    if (!nameInput.trim()) {
-      setNameError('Por favor ingresa tu nombre antes de continuar.');
-      return;
-    }
-    setNameError('');
-    
-    // Hack para saltar el "Autoplay Policy" de navegadores modernos y Apple iOS
+  // Request permissions early on interaction
+  const requestAppPermissions = async () => {
     try {
-      if (!(window as any).globalAudioCtx) {
-        (window as any).globalAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      }
-      const ctx = (window as any).globalAudioCtx;
-      const buffer = ctx.createBuffer(1, 1, 22050);
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
-      source.connect(ctx.destination);
-      source.start(0);
-      ctx.resume();
-    } catch (e) {
-      console.log('Error unlocking audio context', e);
-    }
-    
-    // Solicitar permisos críticos anticipadamente
-    try {
-      await navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => stream.getTracks().forEach(t => t.stop())).catch(() => console.log('Mic no autorizado aún'));
+      await navigator.mediaDevices
+        .getUserMedia({ audio: true })
+        .then((stream) => stream.getTracks().forEach((t) => t.stop()))
+        .catch(() => console.log('Mic no autorizado aún'));
       await Geolocation.requestPermissions();
     } catch (e) {
       console.log('Error pidiendo permisos anticipados', e);
     }
+  };
 
-    setTempRole(selectedRole);
-    if (selectedRole === 'monitor') {
-      setStep(2);
-    } else {
-      setStep(2); // Goes to scan for both client and secondary_monitor
+  const handleSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!emailInput || !passwordInput) {
+      setFormError('Por favor complete correo y contraseña.');
+      return;
+    }
+    setFormError('');
+    setIsLoading(true);
+    await requestAppPermissions();
+
+    const { error } = await signIn(emailInput, passwordInput);
+    setIsLoading(false);
+    if (error) {
+      setFormError(error);
     }
   };
 
-  // Cancela timers pendientes al volver — evita que mensajes de error aparezcan en step 1
-  const handleBack = () => {
-    setStep(1);
-    setTempRole(null);
-    setScanError(false);
-    setCameraError('');
-    if (scanErrorTimerRef.current)   clearTimeout(scanErrorTimerRef.current);
-    if (cameraErrorTimerRef.current) clearTimeout(cameraErrorTimerRef.current);
+  const handleSignUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!emailInput || !passwordInput || !nameInput) {
+      setFormError('Por favor ingrese Nombre, Correo y Contraseña.');
+      return;
+    }
+    setFormError('');
+    setIsLoading(true);
+    await requestAppPermissions();
+
+    const { error } = await signUp(emailInput, passwordInput, nameInput, selectedRole, avatarInput);
+    setIsLoading(false);
+    
+    if (error) {
+      setFormError(error);
+    } else {
+      if (selectedRole === 'monitor') {
+        setMode('show_qr');
+      } else {
+        setMode('scan');
+      }
+    }
   };
 
-  const finalizeMonitor = () => {
-    setUserName(nameInput);
-    if (avatarInput) useStore.getState().setAvatar(avatarInput);
-    setMasterServerId(serverCode);
-    setFamilyCode(serverCode);
-    setTutorSlot('T1');
-    setRole('monitor');
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!emailInput) {
+      setFormError('Por favor ingrese su correo electrónico.');
+      return;
+    }
+    setFormError('');
+    setIsLoading(true);
+
+    const { error } = await resetPassword(emailInput);
+    setIsLoading(false);
+
+    if (error) {
+      setFormError(error);
+    } else {
+      setSuccessMessage('Se ha enviado un enlace para restablecer tu contraseña a tu correo.');
+      setTimeout(() => {
+        setSuccessMessage('');
+        setMode('login');
+      }, 5000);
+    }
   };
 
-  const handleScan = (result: any) => {
+  const handleScan = async (result: any) => {
     if (result && result.length > 0) {
       const text = result[0].rawValue;
-      if (text && text.startsWith('RADAR-')) {
+      if (text) {
         setScanError(false);
         if (scanErrorTimerRef.current) clearTimeout(scanErrorTimerRef.current);
-        setMasterServerId(text);
-        setFamilyCode(text);
-        setUserName(nameInput);
-        if (avatarInput) useStore.getState().setAvatar(avatarInput);
         
-        if (tempRole === 'secondary_monitor') {
-          setTutorSlot('T2');
-          setRole('monitor');
+        setIsLoading(true);
+        const { error } = await joinFamily(text);
+        setIsLoading(false);
+
+        if (!error) {
+          navigate('/client');
         } else {
-          setTutorSlot(null);
-          setRole('client');
+          setScanError(true);
+          if (scanErrorTimerRef.current) clearTimeout(scanErrorTimerRef.current);
+          scanErrorTimerRef.current = setTimeout(() => setScanError(false), 3000);
         }
-      } else {
-        setScanError(true);
-        // ESTABILIDAD: timer con ref — se cancela correctamente en desmontaje y en re-scan
-        if (scanErrorTimerRef.current) clearTimeout(scanErrorTimerRef.current);
-        scanErrorTimerRef.current = setTimeout(() => setScanError(false), 3000);
       }
     }
   };
 
   const handleScanError = (error: unknown) => {
     console.error('Scanner error:', error);
-    // ESTABILIDAD: auto-limpia el error de cámara en 4 segundos.
-    // Evita que un error transitorio de la librería bloquee permanentemente el scanner.
     if (cameraErrorTimerRef.current) clearTimeout(cameraErrorTimerRef.current);
-    setCameraError('No se pudo acceder a la cámara. Cierra otras apps que puedan usarla y reintenta.');
-    cameraErrorTimerRef.current = setTimeout(() => setCameraError(''), 4000);
-  };
-
-  const handleRetryCamera = () => {
-    if (cameraErrorTimerRef.current) clearTimeout(cameraErrorTimerRef.current);
-    setCameraError('');
+    setCameraError('No se pudo acceder a la cámara. Revisa los permisos e intenta de nuevo.');
+    cameraErrorTimerRef.current = setTimeout(() => setCameraError(''), 5000);
   };
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -166,116 +195,342 @@ export default function Onboarding() {
 
   return (
     <div className="onboarding-container">
-      <div className="glass-panel">
+      {/* Brand logo at the very top */}
+      <div style={{ marginBottom: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '190px' }} />
+      </div>
+
+      <div className="glass-panel" style={{ width: '100%', maxWidth: '400px' }}>
         
-        {/* Header - Siempre visible pero más compacto en pasos avanzados */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', marginBottom: step === 1 ? '10px' : '0' }}>
-          <div style={{ background: 'rgba(255,255,255,0.1)', padding: '12px', borderRadius: '50%' }}>
-            <Radar size={32} color="#ec4899" />
-          </div>
-          <div>
-            <h1 style={{ fontSize: step === 1 ? '24px' : '18px', fontWeight: 'bold', margin: 0, transition: 'all 0.3s' }}>
-              Radar Familiar
-            </h1>
-            {step === 1 && <p style={{ fontSize: '13px', opacity: 0.7, margin: '4px 0 0' }}>Seguridad privada P2P</p>}
-          </div>
-        </div>
-
-        {step === 1 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        {/* Header */}
+        {mode !== 'welcome' && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
+            <div style={{ background: 'rgba(255,255,255,0.1)', padding: '12px', borderRadius: '50%' }}>
+              <Radar size={32} color="#ec4899" />
+            </div>
             <div>
-              <div style={{ position: 'relative', marginBottom: '12px' }}>
-                <User size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
-                <input
-                  type="text"
-                  placeholder="Tu Nombre (Ej. Papá o Hijo)"
-                  value={nameInput}
-                  maxLength={50}
-                  onChange={(e) => { setNameInput(e.target.value); setNameError(''); }}
-                  className="glass-input"
-                  style={{ paddingLeft: '44px', margin: 0 }}
-                />
-              </div>
+              <h1 style={{ fontSize: '24px', fontWeight: 'bold', margin: 0 }}>
+                Radar Familiar
+              </h1>
+              <p style={{ fontSize: '12px', opacity: 0.6, margin: '2px 0 0' }}>Seguridad y ubicación en tiempo real</p>
+            </div>
+          </div>
+        )}
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'rgba(255,255,255,0.05)', padding: '12px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                {avatarInput ? (
-                  <img src={avatarInput} alt="Avatar" style={{ width: '48px', height: '48px', borderRadius: '50%', objectFit: 'cover', border: '2px solid #ec4899' }} />
-                ) : (
-                  <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Camera size={20} opacity={0.5} />
-                  </div>
-                )}
-                <div style={{ flex: 1 }}>
-                  <label htmlFor="avatar-upload" style={{ background: 'transparent', color: '#ec4899', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', display: 'block' }}>
-                    {avatarInput ? 'Cambiar Foto' : 'Añadir Foto (Opcional)'}
-                  </label>
-                  <input id="avatar-upload" type="file" accept="image/*" capture="user" onChange={handleAvatarChange} style={{ display: 'none' }} />
-                  <p style={{ fontSize: '10px', opacity: 0.6, margin: '2px 0 0' }}>Para reconocerte en el mapa</p>
+        {/* Errors / Success alerts */}
+        {formError && mode !== 'welcome' && (
+          <div style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid #ef4444', padding: '10px 14px', borderRadius: '12px', color: '#fca5a5', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', textAlign: 'left' }}>
+            <ShieldAlert size={16} style={{ flexShrink: 0 }} />
+            <span>{formError}</span>
+          </div>
+        )}
+
+        {successMessage && mode !== 'welcome' && (
+          <div style={{ background: 'rgba(74,222,128,0.15)', border: '1px solid #4ade80', padding: '10px 14px', borderRadius: '12px', color: '#86efac', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', textAlign: 'left' }}>
+            <ShieldAlert size={16} style={{ flexShrink: 0 }} />
+            <span>{successMessage}</span>
+          </div>
+        )}
+
+        {/* WELCOME LANDING MODE */}
+        {mode === 'welcome' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', alignItems: 'center', width: '100%' }}>
+            <div className="welcome-radar-container">
+              <div className="radar-ping"></div>
+              <div className="radar-ping radar-ping-delay"></div>
+              <div className="radar-core">
+                <Radar size={22} color="#fff" />
+              </div>
+            </div>
+
+            <div style={{ textAlign: 'center' }}>
+              <h2 style={{ fontSize: '22px', fontWeight: 'bold', margin: 0, color: 'white', letterSpacing: '-0.3px' }}>
+                Radar Familiar
+              </h2>
+              <p style={{ fontSize: '12px', opacity: 0.7, margin: '6px 0 0', lineHeight: '1.4' }}>
+                Tu red privada de geolocalización familiar y seguridad táctica 100% segura en la nube.
+              </p>
+            </div>
+
+            <div className="features-grid">
+              <div className="feature-card">
+                <div className="feature-icon-wrapper">
+                  <MapPin size={18} />
+                </div>
+                <div className="feature-card-content">
+                  <h3>Ubicación Proactiva</h3>
+                  <p>Seguimiento cruzado en tiempo real con enfoque interactivo automático.</p>
                 </div>
               </div>
 
-              {nameError && (
-                <p style={{ color: '#fca5a5', fontSize: '12px', marginTop: '6px', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <ShieldAlert size={14} /> {nameError}
-                </p>
-              )}
+              <div className="feature-card">
+                <div className="feature-icon-wrapper">
+                  <Clock size={18} />
+                </div>
+                <div className="feature-card-content">
+                  <h3>Historial Seguro (30d)</h3>
+                  <p>Consulta en todo momento el camino recorrido de tus hijos en los últimos 30 días.</p>
+                </div>
+              </div>
+
+              <div className="feature-card">
+                <div className="feature-icon-wrapper">
+                  <ShieldAlert size={18} style={{ color: '#ef4444' }} />
+                </div>
+                <div className="feature-card-content">
+                  <h3>Alerta Táctica SOS</h3>
+                  <p>Modo de sigilo con pantalla apagada y pánico remoto silencioso de inmediato.</p>
+                </div>
+              </div>
             </div>
 
-            <div className="role-buttons" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <button className="glass-btn primary" onClick={() => handleSelectRole('monitor')}>
-                <QrCode size={18} /> Soy Tutor Principal (Padre/Madre)
+            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '6px' }}>
+              <button 
+                onClick={() => setMode('login')} 
+                className="glass-btn primary"
+                style={{ background: 'linear-gradient(90deg, #ec4899 0%, #8b5cf6 100%)', border: 'none', margin: 0 }}
+              >
+                Ingresar a la App
               </button>
-              <button className="glass-btn secondary" onClick={() => handleSelectRole('secondary_monitor')}>
-                <Scan size={18} /> Soy Tutor Secundario (Tutor)
-              </button>
-              <button className="glass-btn secondary" style={{ opacity: 0.8, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.02)' }} onClick={() => handleSelectRole('client')}>
-                <User size={18} /> Soy Rastreable (Hijo/Hija)
+              <button 
+                onClick={() => setMode('signup')} 
+                className="glass-btn secondary"
+                style={{ background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.15)', margin: 0 }}
+              >
+                Crear una Cuenta
               </button>
             </div>
           </div>
         )}
 
-        {step === 2 && tempRole === 'monitor' && (
+        {/* LOGIN MODE */}
+        {mode === 'login' && (
+          <form onSubmit={handleSignIn} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <div style={{ position: 'relative' }}>
+              <Mail size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
+              <input
+                type="email"
+                placeholder="Correo Electrónico"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                className="glass-input"
+                style={{ paddingLeft: '44px', margin: 0 }}
+                required
+              />
+            </div>
+
+            <div style={{ position: 'relative' }}>
+              <Lock size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
+              <input
+                type={showPassword ? "text" : "password"}
+                placeholder="Contraseña"
+                value={passwordInput}
+                onChange={(e) => setPasswordInput(e.target.value)}
+                className="glass-input"
+                style={{ paddingLeft: '44px', paddingRight: '44px', margin: 0 }}
+                required
+              />
+              <button 
+                type="button" 
+                onClick={() => setShowPassword(!showPassword)} 
+                style={{ position: 'absolute', right: '16px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'white', opacity: 0.6, cursor: 'pointer', padding: 0 }}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
+
+            <button type="submit" disabled={isLoading} className="glass-btn primary" style={{ marginTop: '6px' }}>
+              {isLoading ? 'Iniciando Sesión...' : 'Iniciar Sesión'}
+            </button>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginTop: '8px' }}>
+              <button type="button" onClick={() => { setMode('forgot'); setFormError(''); }} style={{ background: 'none', border: 'none', color: '#ec4899', cursor: 'pointer', padding: 0 }}>
+                ¿Olvidaste tu contraseña?
+              </button>
+              <button type="button" onClick={() => { setMode('signup'); setFormError(''); }} style={{ background: 'none', border: 'none', color: 'white', opacity: 0.8, cursor: 'pointer', padding: 0, fontWeight: 'bold' }}>
+                Crear una Cuenta
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* REGISTER MODE */}
+        {mode === 'signup' && (
+          <form onSubmit={handleSignUp} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <div style={{ position: 'relative' }}>
+              <User size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
+              <input
+                type="text"
+                placeholder="Nombre Completo (ej. Papá, Sofía)"
+                value={nameInput}
+                onChange={(e) => setNameInput(e.target.value)}
+                className="glass-input"
+                style={{ paddingLeft: '44px', margin: 0 }}
+                required
+              />
+            </div>
+
+            <div style={{ position: 'relative' }}>
+              <Mail size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
+              <input
+                type="email"
+                placeholder="Correo Electrónico"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                className="glass-input"
+                style={{ paddingLeft: '44px', margin: 0 }}
+                required
+              />
+            </div>
+
+            <div style={{ position: 'relative' }}>
+              <Lock size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
+              <input
+                type={showPassword ? "text" : "password"}
+                placeholder="Contraseña"
+                value={passwordInput}
+                onChange={(e) => setPasswordInput(e.target.value)}
+                className="glass-input"
+                style={{ paddingLeft: '44px', paddingRight: '44px', margin: 0 }}
+                required
+              />
+              <button 
+                type="button" 
+                onClick={() => setShowPassword(!showPassword)} 
+                style={{ position: 'absolute', right: '16px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'white', opacity: 0.6, cursor: 'pointer', padding: 0 }}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
+
+            {/* Avatar Selector */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'rgba(255,255,255,0.05)', padding: '12px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)' }}>
+              {avatarInput ? (
+                <img src={avatarInput} alt="Avatar" style={{ width: '48px', height: '48px', borderRadius: '50%', objectFit: 'cover', border: '2px solid #ec4899' }} />
+              ) : (
+                <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Camera size={20} opacity={0.5} />
+                </div>
+              )}
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <label htmlFor="avatar-upload" style={{ background: 'transparent', color: '#ec4899', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', display: 'block' }}>
+                  {avatarInput ? 'Cambiar Foto' : 'Añadir Foto (Opcional)'}
+                </label>
+                <input id="avatar-upload" type="file" accept="image/*" capture="user" onChange={handleAvatarChange} style={{ display: 'none' }} />
+                <p style={{ fontSize: '10px', opacity: 0.6, margin: '2px 0 0' }}>Para identificarte en el mapa</p>
+              </div>
+            </div>
+
+            {/* Role selection tabs */}
+            <div>
+              <p style={{ fontSize: '12px', opacity: 0.7, margin: '0 0 8px 0', textAlign: 'left' }}>Selecciona tu Rol:</p>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button 
+                  type="button" 
+                  onClick={() => setSelectedRole('monitor')}
+                  className={`glass-btn ${selectedRole === 'monitor' ? 'primary' : 'secondary'}`} 
+                  style={{ flex: 1, padding: '10px', fontSize: '13px' }}
+                >
+                  <QrCode size={16} /> Tutor / Padre
+                </button>
+                <button 
+                  type="button" 
+                  onClick={() => setSelectedRole('client')}
+                  className={`glass-btn ${selectedRole === 'client' ? 'primary' : 'secondary'}`} 
+                  style={{ flex: 1, padding: '10px', fontSize: '13px' }}
+                >
+                  <User size={16} /> Rastreable
+                </button>
+              </div>
+            </div>
+
+            <button type="submit" disabled={isLoading} className="glass-btn primary" style={{ marginTop: '6px' }}>
+              {isLoading ? 'Registrando...' : 'Registrar y Continuar'}
+            </button>
+
+            <button type="button" onClick={() => { setMode('login'); setFormError(''); }} style={{ background: 'none', border: 'none', color: 'white', opacity: 0.8, cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>
+              ¿Ya tienes cuenta? Inicia Sesión
+            </button>
+          </form>
+        )}
+
+        {/* FORGOT PASSWORD MODE */}
+        {mode === 'forgot' && (
+          <form onSubmit={handleResetPassword} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <p style={{ fontSize: '13px', opacity: 0.8, textAlign: 'left', margin: 0 }}>
+              Ingresa tu correo electrónico y te enviaremos las instrucciones para restablecer tu contraseña.
+            </p>
+
+            <div style={{ position: 'relative' }}>
+              <Mail size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
+              <input
+                type="email"
+                placeholder="Correo Electrónico"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                className="glass-input"
+                style={{ paddingLeft: '44px', margin: 0 }}
+                required
+              />
+            </div>
+
+            <button type="submit" disabled={isLoading} className="glass-btn primary" style={{ marginTop: '6px' }}>
+              {isLoading ? 'Enviando...' : 'Restablecer Contraseña'}
+            </button>
+
+            <button type="button" onClick={() => { setMode('login'); setFormError(''); }} style={{ background: 'none', border: 'none', color: 'white', opacity: 0.8, cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+              <ArrowLeft size={16} /> Volver al Inicio de Sesión
+            </button>
+          </form>
+        )}
+
+        {/* SHOW QR MODE (Monitor registration finished, shows QR for vinculation) */}
+        {mode === 'show_qr' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', alignItems: 'center' }}>
             <div>
-              <h3 style={{ fontSize: '18px', margin: 0 }}>Tu Código</h3>
-              <p style={{ fontSize: '13px', opacity: 0.7, margin: '4px 0 0' }}>Escanea esto con los demás celulares</p>
+              <h3 style={{ fontSize: '18px', margin: 0 }}>¡Registro Completo!</h3>
+              <p style={{ fontSize: '13px', opacity: 0.7, margin: '4px 0 0' }}>
+                Haz que el dispositivo del hijo escanee este código para vincularse de inmediato:
+              </p>
             </div>
             
             <div style={{ background: 'white', padding: '16px', borderRadius: '16px', display: 'inline-block', boxShadow: '0 4px 20px rgba(0,0,0,0.2)' }}>
-              <QRCode value={serverCode} size={180} />
+              {familyCode ? (
+                <QRCode value={familyCode} size={180} />
+              ) : (
+                <div style={{ width: '180px', height: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444' }}>Cargando QR...</div>
+              )}
             </div>
-            
-            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <button className="glass-btn primary" onClick={finalizeMonitor}>
-                Ir a mi Mapa
-              </button>
-              <button className="glass-btn secondary" style={{ opacity: 0.75, border: 'none', background: 'rgba(255,255,255,0.05)' }} onClick={handleBack}>
-                <ArrowLeft size={16} /> Volver
+
+            <div style={{ width: '100%' }}>
+              <button className="glass-btn primary" onClick={() => navigate('/monitor')}>
+                Ir a mi Mapa Monitor
               </button>
             </div>
           </div>
         )}
 
-        {step === 2 && (tempRole === 'client' || tempRole === 'secondary_monitor') && (
+        {/* SCAN QR MODE (Client needs to link family) */}
+        {mode === 'scan' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', alignItems: 'center', width: '100%' }}>
             <div>
-              <h3 style={{ fontSize: '18px', margin: 0 }}>Escanear</h3>
+              <h3 style={{ fontSize: '18px', margin: 0 }}>Vincular con Tutor</h3>
               <p style={{ fontSize: '13px', opacity: 0.7, margin: '4px 0 0' }}>
-                Apunta al código QR del Tutor Principal
+                Apunta tu cámara al código QR en la pantalla del Tutor/Padre:
               </p>
             </div>
 
             {cameraError ? (
-              <div className="error-card">
+              <div className="error-card" style={{ width: '100%' }}>
                 <Camera size={32} color="#fca5a5" />
-                <p style={{ color: '#fca5a5', fontSize: '13px', margin: 0 }}>
-                  No pudimos acceder a la cámara. Por favor, revisa los permisos.
+                <p style={{ color: '#fca5a5', fontSize: '13px', margin: '8px 0' }}>
+                  No se pudo abrir la cámara. Por favor asegúrate de otorgar los permisos.
                 </p>
                 <button 
+                  type="button"
                   className="glass-btn secondary" 
-                  style={{ marginTop: '4px', fontSize: '14px', border: '1px solid rgba(252, 165, 165, 0.4)', color: '#fca5a5' }} 
-                  onClick={handleRetryCamera}
+                  style={{ fontSize: '14px', border: '1px solid rgba(252, 165, 165, 0.4)', color: '#fca5a5' }} 
+                  onClick={() => setCameraError('')}
                 >
                   <RefreshCcw size={14} /> Reintentar
                 </button>
@@ -289,20 +544,20 @@ export default function Onboarding() {
             {scanError && (
               <div style={{ background: 'rgba(252,165,165,0.1)', padding: '10px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <ShieldAlert size={16} color="#fca5a5" />
-                <span style={{ color: '#fca5a5', fontSize: '13px' }}>QR inválido — usa el del Tutor Principal</span>
+                <span style={{ color: '#fca5a5', fontSize: '13px' }}>QR inválido: Asegúrese de escanear el del Tutor.</span>
               </div>
             )}
 
-            <button className="glass-btn secondary" style={{ opacity: 0.75, border: 'none', background: 'rgba(255,255,255,0.05)' }} onClick={handleBack}>
-              <ArrowLeft size={16} /> Volver
+            <button type="button" onClick={() => { setMode('login'); }} className="glass-btn secondary" style={{ opacity: 0.8 }}>
+              Cerrar Sesión / Volver
             </button>
           </div>
         )}
+
       </div>
       
-      <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-        <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '185px' }} />
-        <p style={{ fontSize: '10px', opacity: 0.6, margin: 0 }}>Seguridad Táctica P2P 🛡️</p>
+      <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        <p style={{ fontSize: '10px', opacity: 0.5, margin: 0 }}>🛡️ Seguridad en la Nube con Supabase</p>
       </div>
     </div>
   );

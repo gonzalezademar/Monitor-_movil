@@ -1,13 +1,12 @@
-// Radar Familiar - Production Version - Code Freeze
 import { useStore, playTonalSound, type ChatMessage } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { useRef, useEffect, useState } from 'react';
-import Peer from 'peerjs';
 import { Geolocation } from '@capacitor/geolocation';
 import { MapContainer, TileLayer, Marker, useMap, Popup } from 'react-leaflet';
 import L from 'leaflet';
-import { ShieldAlert, Bell, MessageSquare, LogOut, CheckCircle, Mic, Send, X, Clock, Camera, Menu, Focus, Trash, Smartphone, Sun, Moon, Image } from 'lucide-react';
+import { ShieldAlert, Bell, MessageSquare, LogOut, Mic, Send, X, Camera, Menu, Smartphone, Sun, Moon, Image } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
+import { supabase } from '../supabaseClient';
 
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
@@ -32,7 +31,24 @@ function MapAutoCenter({ target }: { target: [number, number] | null }) {
 }
 
 export default function ClientDashboard() {
-  const { isSOSActive, setSOSActive, logout, userName, avatarBase64, masterServerId, setMyPeerId, messages, addMessage, offlineQueue, enqueueOfflineAction, cleanOldMessages, checkUpdates, updateAvailable, latestReleaseUrl, isCheckingUpdates, updateCheckResult, resetUpdateCheckResult } = useStore();
+  const { 
+    userId, 
+    familyId, 
+    userName, 
+    avatarBase64, 
+    isSOSActive, 
+    setSOSActive, 
+    logout, 
+    messages, 
+    addMessage, 
+    checkUpdates, 
+    updateAvailable, 
+    latestReleaseUrl, 
+    isCheckingUpdates, 
+    updateCheckResult, 
+    resetUpdateCheckResult 
+  } = useStore();
+
   const navigate = useNavigate();
   const openMenu = () => {
     resetUpdateCheckResult();
@@ -43,13 +59,8 @@ export default function ClientDashboard() {
   const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tapCountRef  = useRef(0);
 
-  const peerRef = useRef<Peer | null>(null);
-  const connsRef = useRef<{ T1: any; T2: any }>({ T1: null, T2: null });
-  const [isConnected, setIsConnected] = useState(false);
-  const [t1Connected, setT1Connected] = useState(false);
-  const [t2Connected, setT2Connected] = useState(false);
   const [myLocation, setMyLocation] = useState<[number, number] | null>(null);
-  const [monitorLocation, setMonitorLocation] = useState<{lat: number, lng: number, avatar: string | null} | null>(null);
+  const [familyMembers, setFamilyMembers] = useState<Record<string, { name: string; avatar: string | null; role: 'monitor' | 'client'; lat: number; lng: number; isOnline: boolean }>>({});
   const [ghostModeActive, setGhostModeActive] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [mapCenterTarget, setMapCenterTarget] = useState<[number, number] | null>(null);
@@ -59,7 +70,6 @@ export default function ClientDashboard() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const oscillatorRef = useRef<OscillatorNode | null>(null);
   const [isRemoteAlarmActive, setIsRemoteAlarmActive] = useState(false);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Chat State
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -74,25 +84,41 @@ export default function ClientDashboard() {
   const cancelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wakeLockRef = useRef<any>(null);
   
-  const lastPingT1Ref = useRef<number>(Date.now());
-  const lastPingT2Ref = useRef<number>(Date.now());
-  const disconnectedAtT1Ref = useRef<number | null>(null);
-  const disconnectedAtT2Ref = useRef<number | null>(null);
-  const lastAttemptT1Ref = useRef<number>(0);
-  const lastAttemptT2Ref = useRef<number>(0);
-
-  
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const discardRecordingRef = useRef<boolean>(false);
-  const isConnectedRef = useRef(false);
 
-  // Caché de íconos para evitar parpadeos
-  const myIconRef = useRef(L.divIcon({ className: 'custom-avatar-marker', html: avatarBase64 ? `<div style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid #4ade80;box-shadow:0 0 10px rgba(74,222,128,0.5);"><img src="${avatarBase64}" style="width:100%;height:100%;object-fit:cover;" /></div>` : `<div style="width:24px;height:24px;background:#4ade80;border-radius:50%;border:2px solid white;"></div>`, iconSize: [36, 36], iconAnchor: [18, 18] }));
-  const monitorIconCache = useRef<Record<string, L.DivIcon>>({});
-  
+  // Icons caching
+  const myIconRef = useRef(L.divIcon({ 
+    className: 'custom-avatar-marker', 
+    html: avatarBase64 
+      ? `<div style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid #4ade80;box-shadow:0 0 10px rgba(74,222,128,0.5);"><img src="${avatarBase64}" style="width:100%;height:100%;object-fit:cover;" /></div>` 
+      : `<div style="width:24px;height:24px;background:#4ade80;border-radius:50%;border:2px solid white;"></div>`, 
+    iconSize: [36, 36], 
+    iconAnchor: [18, 18] 
+  }));
+
+  const markerIconCache = useRef<Record<string, L.DivIcon>>({});
   const [gpsError, setGpsError] = useState<string | null>(null);
 
+  const getAvatarIcon = (id: string, avatar: string | null, isOnline: boolean, isMonitor: boolean) => {
+    const key = `${id}-${avatar ? 'avatar' : 'noavatar'}-${isOnline ? 'on' : 'off'}`;
+    if (!markerIconCache.current[key]) {
+      const borderColor = isMonitor ? '#8b5cf6' : '#ec4899';
+      const shadowColor = isMonitor ? 'rgba(139,92,246,0.4)' : 'rgba(236,72,153,0.4)';
+      const opacity = isOnline ? '1' : '0.55';
+
+      markerIconCache.current[key] = L.divIcon({
+        className: `custom-member-marker ${isOnline ? 'online' : 'offline'}`,
+        html: avatar 
+          ? `<div style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid ${borderColor};box-shadow:0 0 10px ${shadowColor};opacity:${opacity};"><img src="${avatar}" style="width:100%;height:100%;object-fit:cover;" /></div>`
+          : `<div style="width:24px;height:24px;background:${borderColor};border-radius:50%;border:2px solid white;opacity:${opacity};"></div>`,
+        iconSize: [36, 36],
+        iconAnchor: [18, 18]
+      });
+    }
+    return markerIconCache.current[key];
+  };
 
   const acquireWakeLock = async () => {
     try {
@@ -101,35 +127,10 @@ export default function ClientDashboard() {
       }
     } catch (e) { console.log('Wakelock failed', e); }
   };
+
   const releaseWakeLock = () => {
     if (wakeLockRef.current) { wakeLockRef.current.release(); wakeLockRef.current = null; }
   };
-
-  useEffect(() => {
-    checkUpdates();
-  }, [checkUpdates]);
-
-  useEffect(() => {
-    return () => {
-      if (sosTimerRef.current) clearTimeout(sosTimerRef.current);
-      if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
-      if (cancelTimerRef.current) clearTimeout(cancelTimerRef.current);
-      if (peerRef.current) peerRef.current.destroy();
-      stopRemoteAlarm();
-      releaseWakeLock();
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-        mediaRecorderRef.current.stop();
-      }
-      if (reconnectTimerRef.current) clearInterval(reconnectTimerRef.current);
-    };
-  }, []);
-
-  // Auto-scroll chat
-  useEffect(() => {
-    if (isChatOpen && chatScrollRef.current) {
-      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
-    }
-  }, [messages, isChatOpen]);
 
   const playRemoteAlarm = () => {
     if (!(window as any).globalAudioCtx) {
@@ -147,25 +148,14 @@ export default function ClientDashboard() {
     osc.frequency.linearRampToValueAtTime(1200, ctx.currentTime + 0.2);
     osc.frequency.linearRampToValueAtTime(600, ctx.currentTime + 0.4);
     
-    setInterval(() => {
-      if (oscillatorRef.current) {
-        osc.frequency.setValueAtTime(600, ctx.currentTime);
-        osc.frequency.linearRampToValueAtTime(1200, ctx.currentTime + 0.2);
-        osc.frequency.linearRampToValueAtTime(600, ctx.currentTime + 0.4);
-      }
-    }, 400);
-
-    gain.gain.value = 1;
     osc.connect(gain);
     gain.connect(ctx.destination);
     osc.start();
     oscillatorRef.current = osc;
     setIsRemoteAlarmActive(true);
     
-    // Fallback disuasivo: Vibración máxima si el dispositivo está silenciado
     if ('vibrate' in navigator) {
       navigator.vibrate([500, 200, 500, 200, 500, 200, 500]);
-      setInterval(() => { if (isRemoteAlarmActive) navigator.vibrate([500, 200, 500]); }, 2000);
     }
   };
 
@@ -178,308 +168,164 @@ export default function ClientDashboard() {
     setIsRemoteAlarmActive(false);
   };
 
-  const updateGlobalConnectionStatus = () => {
-    setTimeout(() => {
-      const anyConnected = !!((connsRef.current.T1 && connsRef.current.T1.open) || (connsRef.current.T2 && connsRef.current.T2.open));
-      setIsConnected(anyConnected);
-      if (!anyConnected && isConnectedRef.current) {
-        playTonalSound('P2P_LOST');
-      }
-      isConnectedRef.current = anyConnected;
-    }, 100);
-  };
-
-  const sendToTutors = (action: any): boolean => {
-    let sent = false;
-    Object.entries(connsRef.current).forEach(([_, conn]: [string, any]) => {
-      if (conn && conn.open) {
-        conn.send(action);
-        sent = true;
-      }
-    });
-    return sent;
-  };
-
-  const connectToTutor = (slot: 'T1' | 'T2') => {
-    if (!peerRef.current || peerRef.current.destroyed || peerRef.current.disconnected) return;
-    
-    const existingConn = connsRef.current[slot];
-    if (existingConn && existingConn.open) return;
-
-    const targetId = `${masterServerId}-${slot}`;
-    console.log(`Conectando a Tutor ${slot} (${targetId})...`);
-    
-    try {
-      const conn = peerRef.current.connect(targetId, {
-        serialization: 'json'
-      });
-      
-      connsRef.current[slot] = conn;
-
-      conn.on('open', () => {
-        console.log(`Conectado a Tutor ${slot}!`);
-        if (slot === 'T1') {
-          setT1Connected(true);
-          disconnectedAtT1Ref.current = null;
-          lastPingT1Ref.current = Date.now();
-        } else {
-          setT2Connected(true);
-          disconnectedAtT2Ref.current = null;
-          lastPingT2Ref.current = Date.now();
-        }
-        updateGlobalConnectionStatus();
-        playTonalSound('P2P_HANDSHAKE');
-
-        conn.send({ type: 'USER_PROFILE', name: userName, avatar: avatarBase64 });
-        
-        // CHAT SYNC: Sincronizar mensajes pendientes al conectar
-        conn.send({ type: 'CHAT_SYNC', messages: useStore.getState().messages });
-
-        const currentQueue = useStore.getState().offlineQueue;
-        if (currentQueue.length > 0) {
-          const uniqueQueue = currentQueue.filter((v: any, i: number, a: any[]) => {
-             if (v.type === 'CHECK_IN') {
-                return a.findIndex(t => t.type === 'CHECK_IN') === i;
-             }
-             return true;
-          });
-          uniqueQueue.forEach(action => conn.send(action));
-          useStore.getState().clearOfflineQueue();
-        }
-      });
-
-      conn.on('data', (data: any) => {
-        if (slot === 'T1') lastPingT1Ref.current = Date.now();
-        else lastPingT2Ref.current = Date.now();
-
-        if (data.type === 'MONITOR_HEARTBEAT') {
-          conn.send({ type: 'HEARTBEAT', name: userName });
-          return;
-        }
-        
-        if (data.type === 'REMOTE_SOS') {
-           setGhostModeActive(false);
-           releaseWakeLock();
-           if (!useStore.getState().isSOSActive) playRemoteAlarm();
-        }
-        if (data.type === 'STOP_REMOTE_SOS') {
-           stopRemoteAlarm();
-           setGhostModeActive(false);
-           if (!useStore.getState().isSOSActive) releaseWakeLock();
-        }
-        if (data.type === 'GHOST_MODE') {
-           setGhostModeActive(true);
-           acquireWakeLock();
-           stopRemoteAlarm();
-        }
-        if (data.type === 'SOS_ALERT') {
-           if (!useStore.getState().isSOSActive) {
-              playRemoteAlarm();
-           }
-        }
-        if (data.type === 'MONITOR_LOCATION') {
-           setMonitorLocation({ lat: data.lat, lng: data.lng, avatar: data.avatar });
-        }
-        if (data.type === 'CHAT_MSG') {
-           addMessage(data.message);
-           playTonalSound('CHAT_RECEIVE');
-        }
-        if (data.type === 'CHAT_SYNC_CONFIRM') {
-           const clientMessages = useStore.getState().messages;
-           const consolidatedMessages = data.messages || [];
-           const combined = [...clientMessages, ...consolidatedMessages];
-           const uniqueMessages = Array.from(new Map(combined.map(m => [m.id, m])).values())
-             .sort((a, b) => a.timestamp - b.timestamp)
-             .slice(-15);
-           useStore.setState({ messages: uniqueMessages });
-        }
-
-        if (data.type === 'SILENT_PING' || data.type === 'GHOST_MODE') {
-           Geolocation.getCurrentPosition({ enableHighAccuracy: true }).then(pos => {
-             if (conn.open) {
-               conn.send({ type: 'LOCATION', lat: pos.coords.latitude, lng: pos.coords.longitude, name: userName || 'Cliente' });
-             }
-           }).catch(e => console.log('Silent ping failed', e));
-        }
-      });
-      
-      conn.on('close', () => {
-        console.log(`Conexión cerrada con Tutor ${slot}`);
-        if (slot === 'T1') {
-          setT1Connected(false);
-        } else {
-          setT2Connected(false);
-        }
-        updateGlobalConnectionStatus();
-      });
-
-      conn.on('error', (err) => {
-        console.warn(`Error en conexión con Tutor ${slot}:`, err);
-        if (slot === 'T1') {
-          setT1Connected(false);
-        } else {
-          setT2Connected(false);
-        }
-        updateGlobalConnectionStatus();
-      });
-    } catch (e) {
-      console.error(`Error al iniciar conexión con ${targetId}:`, e);
-    }
-  };
-
-
-  const setupPeer = () => {
-    if (peerRef.current && !peerRef.current.destroyed) {
-      peerRef.current.destroy();
-    }
-    const savedPeerId = useStore.getState().myPeerId;
-    const peerConfig = {
-      config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' },
-          { urls: 'stun:stun3.l.google.com:19302' },
-          { urls: 'stun:stun4.l.google.com:19302' },
-          {
-            urls: 'turn:openrelay.metered.ca:80',
-            username: 'openrelay',
-            credential: 'openrelay'
-          },
-          {
-            urls: 'turn:openrelay.metered.ca:443',
-            username: 'openrelay',
-            credential: 'openrelay'
-          },
-          {
-            urls: 'turns:openrelay.metered.ca:443?transport=tcp',
-            username: 'openrelay',
-            credential: 'openrelay'
-          }
-        ],
-        sdpSemantics: 'unified-plan'
-      }
-    };
-    const peer = savedPeerId ? new Peer(savedPeerId, peerConfig) : new Peer(peerConfig);
-    peerRef.current = peer;
-
-    peer.on('open', (id) => {
-      setMyPeerId(id);
-      connectToTutor('T1');
-      connectToTutor('T2');
-    });
-
-    peer.on('error', (err) => {
-      console.warn("PeerJS error:", err);
-      if (peer.disconnected) {
-        peer.reconnect();
-      }
-    });
-
-    peer.on('disconnected', () => {
-      console.log("PeerJS disconnected. Reconnecting...");
-      if (!peer.destroyed) {
-        peer.reconnect();
-      }
-    });
-  };
-
-  // P2P Connection
+  // 1. Initial Sync and Realtime subscriptions
   useEffect(() => {
-    if (!masterServerId) return;
+    if (!familyId || !userId) return;
 
     checkUpdates();
-    setupPeer();
 
-    reconnectTimerRef.current = setInterval(() => {
-      const now = Date.now();
-      
-      if (!peerRef.current || peerRef.current.destroyed) {
-        setupPeer();
-        return;
-      }
+    // Fetch initial chat history
+    const fetchChatMessages = async () => {
+      const { data } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('family_id', familyId)
+        .order('timestamp', { ascending: true })
+        .limit(20);
 
-      if (peerRef.current.disconnected) {
-        peerRef.current.reconnect();
+      if (data) {
+        const formatted = data.map(m => ({
+          id: m.id,
+          senderName: m.sender_name,
+          type: m.type as any,
+          content: m.content,
+          timestamp: m.timestamp
+        }));
+        useStore.setState({ messages: formatted });
       }
+    };
 
-      // Check Tutor 1
-      const isT1Active = connsRef.current.T1 && connsRef.current.T1.open && (now - lastPingT1Ref.current <= 30000);
-      if (!isT1Active) {
-        if (connsRef.current.T1) {
-          connsRef.current.T1.close();
-          connsRef.current.T1 = null;
+    // Fetch initial family members
+    const fetchFamilyDetails = async () => {
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('family_id', familyId);
+
+      if (profiles) {
+        const membersMap: any = {};
+        profiles.forEach(p => {
+          if (p.id !== userId) {
+            membersMap[p.id] = {
+              name: p.name,
+              avatar: p.avatar,
+              role: p.role,
+              lat: 0,
+              lng: 0,
+              isOnline: false
+            };
+          }
+        });
+
+        const { data: locs } = await supabase
+          .from('locations')
+          .select('*')
+          .eq('family_id', familyId);
+
+        if (locs) {
+          locs.forEach(l => {
+            if (membersMap[l.user_id]) {
+              membersMap[l.user_id].lat = l.latitude;
+              membersMap[l.user_id].lng = l.longitude;
+              membersMap[l.user_id].isOnline = (Date.now() - new Date(l.updated_at).getTime() < 60000);
+            }
+          });
         }
-        setT1Connected(false);
-        
-        if (disconnectedAtT1Ref.current === null) {
-          disconnectedAtT1Ref.current = now;
-        }
-        
-        const elapsed = now - disconnectedAtT1Ref.current;
-        let interval = 5000;
-        if (elapsed > 600000) { // 10 minutos
-          interval = 60000;
-        } else if (elapsed > 180000) { // 3 minutos
-          interval = 30000;
-        }
-        
-        if (now - lastAttemptT1Ref.current >= interval) {
-          lastAttemptT1Ref.current = now;
-          connectToTutor('T1');
-        }
-      } else {
-        disconnectedAtT1Ref.current = null;
+        setFamilyMembers(membersMap);
       }
-      
-      // Check Tutor 2
-      const isT2Active = connsRef.current.T2 && connsRef.current.T2.open && (now - lastPingT2Ref.current <= 30000);
-      if (!isT2Active) {
-        if (connsRef.current.T2) {
-          connsRef.current.T2.close();
-          connsRef.current.T2 = null;
+    };
+
+    fetchChatMessages();
+    fetchFamilyDetails();
+
+    // Subscribe to alerts
+    const alertsSub = supabase
+      .channel(`alerts-${familyId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'alerts', filter: `family_id=eq.${familyId}` },
+        (payload: any) => {
+          if (payload.new) {
+            const data = payload.new;
+            // Listen to remote siren trigger (if active and triggered by another profile)
+            if (data.siren_active && data.origin_user_id !== userId) {
+              playRemoteAlarm();
+            } else if (!data.siren_active) {
+              stopRemoteAlarm();
+            }
+          }
         }
-        setT2Connected(false);
-        
-        if (disconnectedAtT2Ref.current === null) {
-          disconnectedAtT2Ref.current = now;
+      )
+      .subscribe();
+
+    // Subscribe to Locations
+    const locationsSub = supabase
+      .channel(`locations-${familyId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'locations', filter: `family_id=eq.${familyId}` },
+        (payload: any) => {
+          if (payload.new && payload.new.user_id !== userId) {
+            const row = payload.new;
+            setFamilyMembers(prev => {
+              if (prev[row.user_id]) {
+                return {
+                  ...prev,
+                  [row.user_id]: {
+                    ...prev[row.user_id],
+                    lat: row.latitude,
+                    lng: row.longitude,
+                    isOnline: true
+                  }
+                };
+              }
+              return prev;
+            });
+          }
         }
-        
-        const elapsed = now - disconnectedAtT2Ref.current;
-        let interval = 5000;
-        if (elapsed > 600000) { // 10 minutos
-          interval = 60000;
-        } else if (elapsed > 180000) { // 3 minutos
-          interval = 30000;
+      )
+      .subscribe();
+
+    // Subscribe to new Messages
+    const messagesSub = supabase
+      .channel(`messages-${familyId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: `family_id=eq.${familyId}` },
+        (payload: any) => {
+          if (payload.new && payload.new.sender_id !== userId) {
+            const m = payload.new;
+            addMessage({
+              id: m.id,
+              senderName: m.sender_name,
+              type: m.type as any,
+              content: m.content,
+              timestamp: m.timestamp
+            });
+            playTonalSound('CHAT_RECEIVE');
+          }
         }
-        
-        if (now - lastAttemptT2Ref.current >= interval) {
-          lastAttemptT2Ref.current = now;
-          connectToTutor('T2');
-        }
-      } else {
-        disconnectedAtT2Ref.current = null;
-      }
-      
-      updateGlobalConnectionStatus();
-    }, 5000);
+      )
+      .subscribe();
 
     return () => {
-      if (reconnectTimerRef.current) clearInterval(reconnectTimerRef.current);
-      if (peerRef.current) peerRef.current.destroy();
+      alertsSub.unsubscribe();
+      locationsSub.unsubscribe();
+      messagesSub.unsubscribe();
     };
-  }, [masterServerId, setMyPeerId, userName, addMessage, checkUpdates]);
+  }, [familyId, userId, addMessage, checkUpdates]);
 
-
-  // Geolocation
+  // 2. Geolocation Watcher
   useEffect(() => {
+    if (!userId || !familyId) return;
+
     let watchId: string | null = null;
     
     const startTracking = async () => {
       try {
         const perm = await Geolocation.requestPermissions();
         if (perm.location !== 'granted') {
-          setGpsError("GPS Denegado. La app no puede protegerte sin ubicación. Por favor, actívalo en los ajustes de tu teléfono.");
+          setGpsError("GPS Denegado. Actívalo en los ajustes de tu teléfono.");
           return;
         }
         setGpsError(null);
@@ -487,22 +333,35 @@ export default function ClientDashboard() {
         watchId = await Geolocation.watchPosition(
           { enableHighAccuracy: true, timeout: 10000 },
           (position) => {
-             if (position) {
-                 const coords: [number, number] = [position.coords.latitude, position.coords.longitude];
-                 setMyLocation(coords);
-                 if (useStore.getState().isSOSActive) {
-                     sendToTutors({
-                         type: 'LOCATION',
-                         lat: position.coords.latitude,
-                         lng: position.coords.longitude,
-                         name: userName || 'Cliente'
-                      });
-                 }
-             }
+            if (position) {
+              const coords: [number, number] = [position.coords.latitude, position.coords.longitude];
+              setMyLocation(coords);
+
+              // Update coordinates in Supabase Realtime table
+              supabase.from('locations').upsert({
+                user_id: userId,
+                family_id: familyId,
+                latitude: position.coords.latitude,
+                longitude: position.coords.longitude,
+                updated_at: new Date().toISOString()
+              }).then(({ error }) => {
+                if (error) console.error("Error upserting location:", error);
+              });
+
+              // Record to 30-day history logs
+              supabase.from('locations_history').insert({
+                user_id: userId,
+                family_id: familyId,
+                latitude: position.coords.latitude,
+                longitude: position.coords.longitude
+              }).then(({ error }) => {
+                if (error) console.error("Error writing locations_history:", error);
+              });
+            }
           }
         );
       } catch (e) {
-        console.error('Error al iniciar geolocalización', e);
+        console.error('Error starting location watcher', e);
       }
     };
     
@@ -511,60 +370,67 @@ export default function ClientDashboard() {
     return () => {
       if (watchId) Geolocation.clearWatch({ id: watchId });
     };
-  }, [userName, avatarBase64]);
+  }, [userId, familyId]);
 
-  // Auto-centrado reactivo según el objetivo de seguimiento
+  // Reactive Map Centering
   useEffect(() => {
     if (!trackingTargetId) return;
     if (trackingTargetId === 'me') {
       if (myLocation) {
         setMapCenterTarget(myLocation);
       }
-    } else if (trackingTargetId === 'monitor') {
-      if (monitorLocation) {
-        setMapCenterTarget([monitorLocation.lat, monitorLocation.lng]);
-      }
-    }
-  }, [trackingTargetId, myLocation, monitorLocation]);
-
-  // SOS status
-  useEffect(() => {
-    if (isSOSActive) {
-      stopRemoteAlarm(); // Prioridad sigilo
-      acquireWakeLock(); // No dormir en pánico
-      const sent = sendToTutors({ type: 'SOS_ALERT', name: userName || 'Cliente' });
-      if (!sent) {
-        enqueueOfflineAction({ type: 'SOS_ALERT', name: userName || 'Cliente' });
-      }
     } else {
-      if (!ghostModeActive) releaseWakeLock();
-    }
-  }, [isSOSActive, userName, ghostModeActive, enqueueOfflineAction]);
-
-  const sendAction = (type: string) => {
-    const action: any = { type, name: userName };
-    if (type === 'CHECK_IN' && myLocation) {
-      action.lat = myLocation[0];
-      action.lng = myLocation[1];
-    }
-    const sent = sendToTutors(action);
-    if (!sent) {
-      enqueueOfflineAction(action);
-    }
-  };
-
-  const dispatchChatMessage = (msg: ChatMessage) => {
-    addMessage(msg);
-    const action = { type: 'CHAT_MSG', message: msg };
-    const sent = sendToTutors(action);
-    if (!sent) {
-      // Evitar cuelgue de memoria por notas de voz offline (Límite LocalStorage)
-      if (msg.type !== 'AUDIO') {
-        enqueueOfflineAction(action);
-      } else {
-        alert("Sin conexión: La nota de voz no se pudo enviar y fue descartada para ahorrar memoria.");
+      const target = familyMembers[trackingTargetId];
+      if (target && target.lat !== 0 && target.lng !== 0) {
+        setMapCenterTarget([target.lat, target.lng]);
       }
     }
+  }, [trackingTargetId, myLocation, familyMembers]);
+
+  // SOS status trigger
+  useEffect(() => {
+    if (!familyId || !userId) return;
+
+    const triggerSOS = async () => {
+      if (isSOSActive) {
+        stopRemoteAlarm();
+        acquireWakeLock();
+        // Update SOS alerts row
+        await supabase.from('alerts').upsert({
+          family_id: familyId,
+          is_sos_active: true,
+          origin_user_id: userId,
+          origin_name: userName,
+          updated_at: new Date().toISOString()
+        });
+      } else {
+        if (!ghostModeActive) releaseWakeLock();
+        await supabase.from('alerts').upsert({
+          family_id: familyId,
+          is_sos_active: false,
+          origin_user_id: null,
+          origin_name: null,
+          updated_at: new Date().toISOString()
+        });
+      }
+    };
+    
+    triggerSOS();
+  }, [isSOSActive, familyId, userId, userName, ghostModeActive]);
+
+  const dispatchChatMessage = async (msg: ChatMessage) => {
+    addMessage(msg);
+    if (!familyId || !userId) return;
+
+    // Send chat message directly to database
+    await supabase.from('messages').insert({
+      family_id: familyId,
+      sender_id: userId,
+      sender_name: userName,
+      type: msg.type,
+      content: msg.content,
+      timestamp: msg.timestamp
+    });
   };
 
   const handleSendText = () => {
@@ -580,117 +446,86 @@ export default function ClientDashboard() {
     setTextInput('');
   };
 
+  const handleSendImage = (base64: string) => {
+    const msg: ChatMessage = {
+      id: Date.now().toString(),
+      senderName: userName,
+      type: 'IMAGE',
+      content: base64,
+      timestamp: Date.now()
+    };
+    dispatchChatMessage(msg);
+  };
+
+  const handleSendAudio = (base64: string) => {
+    const msg: ChatMessage = {
+      id: Date.now().toString(),
+      senderName: userName,
+      type: 'AUDIO',
+      content: base64,
+      timestamp: Date.now()
+    };
+    dispatchChatMessage(msg);
+  };
+
   const toggleRecording = async () => {
     if (isRecording) {
       if (mediaRecorderRef.current) mediaRecorderRef.current.stop();
       setIsRecording(false);
-      return;
-    }
-
-    if (isProcessingMic) return;
-
-    setIsProcessingMic(true);
-    discardRecordingRef.current = false;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorderRef.current = new MediaRecorder(stream);
-      audioChunksRef.current = [];
-      
-      mediaRecorderRef.current.ondataavailable = (e) => {
-        audioChunksRef.current.push(e.data);
-      };
-
-      mediaRecorderRef.current.onstop = () => {
-        if (discardRecordingRef.current) {
-          discardRecordingRef.current = false;
-          setIsProcessingMic(false);
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioChunksRef.current = [];
+        discardRecordingRef.current = false;
+        
+        const mediaRecorder = new MediaRecorder(stream);
+        mediaRecorderRef.current = mediaRecorder;
+        
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) audioChunksRef.current.push(event.data);
+        };
+        
+        mediaRecorder.onstop = () => {
           stream.getTracks().forEach(track => track.stop());
-          return;
-        }
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const reader = new FileReader();
-        reader.readAsDataURL(audioBlob);
-        reader.onloadend = () => {
-          const base64Audio = reader.result as string;
-          const msg: ChatMessage = {
-            id: Date.now().toString(),
-            senderName: userName,
-            type: 'AUDIO',
-            content: base64Audio,
-            timestamp: Date.now()
+          if (discardRecordingRef.current) return;
+          setIsProcessingMic(true);
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64 = reader.result as string;
+            handleSendAudio(base64);
+            setIsProcessingMic(false);
           };
-          dispatchChatMessage(msg);
-          setIsProcessingMic(false);
+          reader.readAsDataURL(audioBlob);
         };
-        stream.getTracks().forEach(track => track.stop());
-      };
-
-      mediaRecorderRef.current.start();
-      setIsRecording(true);
-      playTonalSound('PTT_START');
-    } catch (err) {
-      console.error('Error al acceder al micrófono', err);
-      setIsProcessingMic(false);
+        
+        mediaRecorder.start();
+        setIsRecording(true);
+      } catch (e) {
+        console.error('Error starting recording', e);
+        alert('Permiso de micrófono denegado o no disponible.');
+      }
     }
   };
 
-  const cancelRecording = () => {
-    discardRecordingRef.current = true;
-    if (mediaRecorderRef.current) {
-      mediaRecorderRef.current.stop();
-    }
-    setIsRecording(false);
-  };
-
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new window.Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const MAX_SIZE = 400; // Táctico: ultra liviano
-        let width = img.width;
-        let height = img.height;
-
-        if (width > height) {
-          if (width > MAX_SIZE) {
-            height *= MAX_SIZE / width;
-            width = MAX_SIZE;
-          }
-        } else {
-          if (height > MAX_SIZE) {
-            width *= MAX_SIZE / height;
-            height = MAX_SIZE;
-          }
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0, width, height);
-
-        const compressedBase64 = canvas.toDataURL('image/jpeg', 0.5);
-
-        const msg: ChatMessage = {
-          id: Date.now().toString(),
-          senderName: userName,
-          type: 'IMAGE',
-          content: compressedBase64,
-          timestamp: Date.now()
-        };
-        dispatchChatMessage(msg);
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = reader.result as string;
+        handleSendImage(base64);
       };
-      img.src = event.target?.result as string;
-    };
-    reader.readAsDataURL(file);
+      reader.readAsDataURL(file);
+    }
   };
 
+  // SOS Gesture logic
   const handleSOSPressStart = () => {
-    sosTimerRef.current = setTimeout(() => setSOSActive(true), 2000);
+    if (sosTimerRef.current) clearTimeout(sosTimerRef.current);
+    sosTimerRef.current = setTimeout(() => {
+      setSOSActive(true);
+    }, 3000);
   };
 
   const handleSOSPressEnd = () => {
@@ -700,65 +535,44 @@ export default function ClientDashboard() {
     }
   };
 
-  const cancelSOS = () => {
-    setSOSActive(false);
-    stopRemoteAlarm(); // Apagado forzoso de cualquier alarma que esté sonando de fondo
-    sendToTutors({ type: 'SOS_CANCELED', name: userName });
-  };
-
-  const startCancelSOS = (e: any) => {
-    e.stopPropagation();
-    cancelTimerRef.current = setTimeout(() => {
-      cancelSOS();
-    }, 2000);
-  };
-
-  const stopCancelSOS = (e: any) => {
-    e.stopPropagation();
+  const startCancelSOS = () => {
     if (cancelTimerRef.current) clearTimeout(cancelTimerRef.current);
+    cancelTimerRef.current = setTimeout(() => {
+      setSOSActive(false);
+      setGhostModeActive(false);
+      releaseWakeLock();
+    }, 3000);
   };
 
-  const handleBlackoutTap = () => {
-    tapCountRef.current += 1;
-    if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
-    if (tapCountRef.current >= 5) {
-      tapCountRef.current = 0;
-      cancelSOS();
-    } else {
-      tapTimerRef.current = setTimeout(() => tapCountRef.current = 0, 3000);
+  const stopCancelSOS = () => {
+    if (cancelTimerRef.current) {
+      clearTimeout(cancelTimerRef.current);
+      cancelTimerRef.current = null;
     }
   };
 
-  const handleLogout = () => {
-    setIsUnlinkModalOpen(true);
-    setUnlinkConfirmName('');
+  const handleBlackoutTap = () => {
+    if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
+    tapCountRef.current += 1;
+    
+    if (tapCountRef.current >= 5) {
+      setSOSActive(false);
+      setGhostModeActive(false);
+      releaseWakeLock();
+      tapCountRef.current = 0;
+      return;
+    }
+    
+    tapTimerRef.current = setTimeout(() => {
+      tapCountRef.current = 0;
+    }, 2000);
   };
 
   const confirmLogout = () => {
     if (unlinkConfirmName.trim() === userName.trim()) {
-      const doubleCheck = window.confirm("¿Está completamente seguro de que desea desvincular el dispositivo? Perderá la conexión de seguridad permanente.");
+      const doubleCheck = window.confirm("¿Estás seguro de desvincular este dispositivo de tu familia en la nube?");
       if (!doubleCheck) return;
-
       setIsUnlinkModalOpen(false);
-      
-      // Detener guardián y peer inmediatamente
-      if (reconnectTimerRef.current) {
-        clearInterval(reconnectTimerRef.current);
-        reconnectTimerRef.current = null;
-      }
-      if (peerRef.current) {
-        peerRef.current.destroy();
-        peerRef.current = null;
-      }
-      if (connsRef.current.T1) {
-        connsRef.current.T1.close();
-        connsRef.current.T1 = null;
-      }
-      if (connsRef.current.T2) {
-        connsRef.current.T2.close();
-        connsRef.current.T2 = null;
-      }
-
       logout();
       navigate('/');
     }
@@ -778,13 +592,6 @@ export default function ClientDashboard() {
     );
   }
 
-  // Effect to clean old messages periodically (Barredor 24hs real)
-  useEffect(() => {
-    cleanOldMessages();
-    const interval = setInterval(cleanOldMessages, 60 * 60 * 1000); // Cada 1 hora
-    return () => clearInterval(interval);
-  }, [cleanOldMessages]);
-
   return (
     <div className="dashboard-container" style={{ position: 'relative', overflow: 'hidden' }}>
       {gpsError && (
@@ -803,24 +610,14 @@ export default function ClientDashboard() {
           </Marker>
         )}
 
-        {monitorLocation && (
-          <Marker position={[monitorLocation.lat, monitorLocation.lng]} icon={(() => {
-            const cacheKey = monitorLocation.avatar ? 'avatar' : 'no_avatar';
-            if (!monitorIconCache.current[cacheKey]) {
-              monitorIconCache.current[cacheKey] = L.divIcon({ 
-                className: 'monitor-avatar-marker', 
-                html: monitorLocation.avatar 
-                  ? `<div style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid #8b5cf6;box-shadow:0 0 10px rgba(139,92,246,0.5);"><img src="${monitorLocation.avatar}" style="width:100%;height:100%;object-fit:cover;" /></div>` 
-                  : `<div style="width:24px;height:24px;background:#8b5cf6;border-radius:50%;border:2px solid white;"></div>`, 
-                iconSize: [36, 36], 
-                iconAnchor: [18, 18] 
-              });
-            }
-            return monitorIconCache.current[cacheKey];
-          })()}>
-            <Popup>Monitor (Padre)</Popup>
-          </Marker>
-        )}
+        {Object.entries(familyMembers).map(([id, member]) => {
+          if (member.lat === 0 && member.lng === 0) return null;
+          return (
+            <Marker key={id} position={[member.lat, member.lng]} icon={getAvatarIcon(id, member.avatar, member.isOnline, member.role === 'monitor')}>
+              <Popup>{member.name} ({member.role === 'monitor' ? 'Tutor' : 'Hijo'})</Popup>
+            </Marker>
+          );
+        })}
       </MapContainer>
 
       <button 
@@ -831,15 +628,13 @@ export default function ClientDashboard() {
         {mapTheme === 'dark' ? <Sun size={24} /> : <Moon size={24} />}
       </button>
 
-      {/* Panel flotante de Avatares para Seguimiento */}
+      {/* Floating Avatars Tracking panel */}
       <div className="map-avatars-container">
         <button 
           className={`map-avatar-btn ${trackingTargetId === 'me' ? 'active' : ''}`}
           onClick={() => {
             setTrackingTargetId('me');
-            if (myLocation) {
-              setMapCenterTarget(myLocation);
-            }
+            if (myLocation) setMapCenterTarget(myLocation);
           }}
           title="Centrar en mí"
         >
@@ -850,22 +645,25 @@ export default function ClientDashboard() {
           )}
         </button>
 
-        {monitorLocation && (
+        {Object.entries(familyMembers).map(([id, member]) => (
           <button
-            className={`map-avatar-btn ${trackingTargetId === 'monitor' ? 'active' : ''} monitor`}
+            key={id}
+            className={`map-avatar-btn ${trackingTargetId === id ? 'active' : ''} ${member.role === 'monitor' ? 'monitor' : ''}`}
             onClick={() => {
-              setTrackingTargetId('monitor');
-              setMapCenterTarget([monitorLocation.lat, monitorLocation.lng]);
+              setTrackingTargetId(id);
+              if (member.lat !== 0 && member.lng !== 0) {
+                setMapCenterTarget([member.lat, member.lng]);
+              }
             }}
-            title="Seguir al Monitor (Padre)"
+            title={`Seguir a ${member.name}`}
           >
-            {monitorLocation.avatar ? (
-              <img src={monitorLocation.avatar} alt="Monitor" />
+            {member.avatar ? (
+              <img src={member.avatar} alt={member.name} style={{ opacity: member.isOnline ? 1 : 0.5 }} />
             ) : (
-              <div className="map-avatar-placeholder">M</div>
+              <div className="map-avatar-placeholder" style={{ opacity: member.isOnline ? 1 : 0.5 }}>{member.name.charAt(0).toUpperCase()}</div>
             )}
           </button>
-        )}
+        ))}
       </div>
 
       {/* Alerta de Alarma Remota del Padre */}
@@ -877,51 +675,35 @@ export default function ClientDashboard() {
         </div>
       )}
 
-      {!isConnected && (
-        <div style={{ position: 'absolute', top: 76, left: '50%', transform: 'translateX(-50%)', background: 'rgba(220, 38, 38, 0.9)', color: 'white', padding: '8px 20px', borderRadius: '20px', fontSize: '14px', zIndex: 1100, display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {offlineQueue.length > 0 && <Clock size={14} color="#facc15" />}
-          <span>⚠️ Desconectado</span>
-        </div>
-      )}
+      {/* Botón flotante del menú lateral */}
+      <button 
+        className="menu-btn" 
+        onClick={openMenu} 
+        style={{ position: 'absolute', top: '16px', left: '16px', zIndex: 1000 }}
+      >
+        <Menu size={24} />
+      </button>
 
-      {/* Top Bar Overlay */}
-      <div className="top-bar">
-        <button className="icon-btn" onClick={openMenu} style={{ position: 'relative' }}>
-          <Menu size={24} />
-          {updateAvailable && (
-            <span style={{ position: 'absolute', top: -2, right: -2, width: '10px', height: '10px', background: '#ec4899', borderRadius: '50%', border: '2px solid #0f172a', animation: 'dotPulse 1.5s infinite' }} />
-          )}
-        </button>
-        <div className="top-bar-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span className={`led-indicator ${isConnected ? 'led-green' : 'led-red'}`} /><span>{userName} - Rastreable</span></div>
-        <button className="icon-btn" onClick={() => setIsChatOpen(true)}>
-          <MessageSquare size={24} />
-        </button>
-      </div>
-
-      {/* Bottom Bar Overlay */}
-      <div className="bottom-bar">
-        <button className="bottom-action" onClick={() => myLocation && setMapCenterTarget(myLocation)}><Focus size={30} /><span>Centrar</span></button>
-        
-        {/* Llegué Bien Action */}
-        <button className="bottom-action" onClick={() => sendAction('CHECK_IN')}>
-          <CheckCircle size={30} color="#4ade80" />
-          <span style={{ color: '#4ade80' }}>Llegué Bien</span>
-        </button>
-
-        {/* SOS Button inside bottom-bar */}
+      {/* Panel táctico de SOS (Pulsación de 3 segundos) */}
+      <div className="tactical-sos-panel">
         <button 
-          className="bottom-action" 
           onMouseDown={handleSOSPressStart} onMouseUp={handleSOSPressEnd} onMouseLeave={handleSOSPressEnd}
-          onTouchStart={handleSOSPressStart} onTouchEnd={handleSOSPressEnd} onTouchMove={handleSOSPressEnd} onTouchCancel={handleSOSPressEnd}
-          style={{
-            color: isSOSActive ? '#4ade80' : 'rgba(251, 113, 133, 0.5)',
-            animation: isSOSActive ? 'pulse-green 1s infinite' : 'none'
-          }}
+          onTouchStart={handleSOSPressStart} onTouchEnd={handleSOSPressEnd}
+          className={`sos-btn ${isSOSActive ? 'active' : ''}`}
+          style={{ width: '80px', height: '80px', borderRadius: '50%', background: 'red', border: '3px solid white', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold', fontSize: '18px', boxShadow: '0 4px 20px rgba(255,0,0,0.5)', zIndex: 1000, touchAction: 'none' }}
         >
-          <ShieldAlert size={30} color={isSOSActive ? '#4ade80' : 'rgba(251, 113, 133, 0.5)'} />
-          <span>{isSOSActive ? '🚨 SOS: TRANSMITIENDO' : '🛡️ SOS: DESACTIVADO'}</span>
+          SOS
         </button>
       </div>
+
+      {/* Botón de chat táctico */}
+      <button 
+        className="chat-toggle-btn"
+        onClick={() => setIsChatOpen(true)}
+        style={{ position: 'absolute', bottom: '16px', left: '16px', zIndex: 1000, background: 'rgba(30,27,75,0.8)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', width: '56px', height: '56px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.3)', cursor: 'pointer' }}
+      >
+        <MessageSquare size={24} />
+      </button>
 
       {/* Logo corporativo flotante en mapa (esquina inferior derecha) */}
       <div className="floating-brand-logo">
@@ -944,209 +726,217 @@ export default function ClientDashboard() {
         <div style={{ marginBottom: '32px' }}>
           <p style={{ fontSize: '11px', opacity: 0.5, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>Tutores Vinculados</p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px' }}>
-              <span className={`led-indicator ${t1Connected ? 'led-green' : 'led-red'}`} />
-              <span style={{ fontSize: '14px' }}>Tutor Principal (T1)</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px' }}>
-              <span className={`led-indicator ${t2Connected ? 'led-green' : 'led-red'}`} />
-              <span style={{ fontSize: '14px' }}>Tutor Secundario (T2)</span>
-            </div>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', opacity: 0.7 }}>
-            <Smartphone size={20} />
-            <span style={{ fontSize: '14px' }}>Grupo: {masterServerId}</span>
-          </div>
-        </div>
-
-        <div style={{ marginBottom: '32px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '20px' }}>
-          <p style={{ fontSize: '11px', opacity: 0.5, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>Mi Perfil y Aplicación</p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', marginBottom: '12px' }}>
-            {avatarBase64 ? (
-              <img src={avatarBase64} alt={userName} style={{ width: '40px', height: '40px', borderRadius: '50%', border: '2px solid rgba(255,255,255,0.2)' }} />
+            {Object.values(familyMembers).filter(m => m.role === 'monitor').length === 0 ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', opacity: 0.7 }}>
+                <Smartphone size={20} />
+                <span style={{ fontSize: '14px' }}>No hay tutores vinculados</span>
+              </div>
             ) : (
-              <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#4f46e5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{userName.charAt(0).toUpperCase()}</div>
-            )}
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <span style={{ fontSize: '14px', fontWeight: 'bold' }}>{userName}</span>
-              <span style={{ fontSize: '11px', opacity: 0.6 }}>Versión: v1.0.0</span>
-            </div>
-          </div>
-          
-          <button 
-            className="menu-item" 
-            onClick={() => checkUpdates()}
-            disabled={isCheckingUpdates}
-            style={{ width: '100%', display: 'flex', gap: '10px', alignItems: 'center', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}
-          >
-            <span>🔍</span>
-            <span>{isCheckingUpdates ? 'Buscando actualizaciones...' : 'Buscar Actualizaciones'}</span>
-          </button>
-          
-          {updateCheckResult === 'no_updates' && (
-            <p style={{ fontSize: '12px', color: '#4ade80', marginTop: '8px', paddingLeft: '8px' }}>✓ Tu aplicación está al día (v1.0.0)</p>
-          )}
-          {updateCheckResult === 'error' && (
-            <p style={{ fontSize: '12px', color: '#ef4444', marginTop: '8px', paddingLeft: '8px' }}>❌ Error al consultar actualizaciones.</p>
-          )}
-        </div>
-
-        {updateAvailable && (
-          <div style={{ margin: '10px', padding: '12px', background: 'rgba(236, 72, 153, 0.15)', border: '1px solid rgba(236, 72, 153, 0.3)', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <span style={{ fontSize: '13px', color: '#fbcfe8', fontWeight: 'bold' }}>📢 Actualización pendiente ({updateAvailable})</span>
-            <button 
-              onClick={() => window.open(latestReleaseUrl, '_blank')} 
-              style={{ background: '#ec4899', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', textAlign: 'center' }}
-            >
-              Descargar APK ahora
-            </button>
-          </div>
-        )}
-
-        <button className="menu-item" onClick={handleLogout} style={{ marginTop: 'auto', display: 'flex', gap: '12px', color: '#fb7185' }}>
-          <LogOut size={18} />
-          <span>Desvincular / Salir</span>
-        </button>
-      </div>
-
-      {/* Chat Overlay */}
-      <div style={{ position: 'absolute', top: isChatOpen ? 0 : '100%', left: 0, right: 0, bottom: 0, background: 'rgba(15, 23, 42, 0.95)', backdropFilter: 'blur(10px)', zIndex: 2000, transition: 'top 0.3s cubic-bezier(0.4, 0, 0.2, 1)', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ display: 'flex', alignItems: 'center', padding: '20px', background: 'rgba(255,255,255,0.05)' }}>
-          <h2 style={{ margin: 0, fontSize: '18px', display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
-            <MessageSquare size={20} color="#8b5cf6" /> Comunicación P2P
-          </h2>
-          <button onClick={() => setIsChatOpen(false)} style={{ background: 'none', border: 'none', color: '#ccc' }}>
-            <X size={24} />
-          </button>
-        </div>
-
-        <div ref={chatScrollRef} style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {messages.map((msg) => {
-            const isMe = msg.senderName === userName;
-            return (
-              <div key={msg.id} style={{ alignSelf: isMe ? 'flex-end' : 'flex-start', maxWidth: '80%' }}>
-                <div style={{ fontSize: '11px', opacity: 0.5, marginBottom: '4px', textAlign: isMe ? 'right' : 'left' }}>
-                  {msg.senderName} • {new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                </div>
-                <div style={{ background: isMe ? '#4f46e5' : 'rgba(255,255,255,0.1)', padding: '12px', borderRadius: '16px', borderBottomRightRadius: isMe ? '4px' : '16px', borderBottomLeftRadius: isMe ? '16px' : '4px' }}>
-                  {msg.type === 'TEXT' ? (
-                    <span style={{ fontSize: '14px' }}>{msg.content}</span>
-                  ) : msg.type === 'AUDIO' ? (
-                    <audio controls src={msg.content} style={{ height: '30px', maxWidth: '100%' }} />
+              Object.entries(familyMembers).filter(([_, m]) => m.role === 'monitor').map(([id, member]) => (
+                <div key={id} style={{ display: 'flex', alignItems: 'center', justifyItems: 'center', gap: '12px', padding: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px' }}>
+                  {member.avatar ? (
+                    <img src={member.avatar} alt={member.name} style={{ width: '32px', height: '32px', borderRadius: '50%', objectFit: 'cover' }} />
                   ) : (
-                    <img src={msg.content} alt="táctica" className="chat-image-preview" onClick={() => {
-                      const win = window.open();
-                      win?.document.write(`<body style="background:#000;display:flex;justify-content:center;align-items:center;margin:0;"><img src="${msg.content}" style="max-width:100%;max-height:100%;object-fit:contain;" /></body>`);
-                    }} />
+                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#8b5cf6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{member.name.charAt(0).toUpperCase()}</div>
                   )}
+                  <div style={{ flex: 1, textAlign: 'left' }}>
+                    <p style={{ fontSize: '14px', fontWeight: 'bold', margin: 0 }}>{member.name}</p>
+                    <p style={{ fontSize: '11px', opacity: 0.6, margin: 0 }}>{member.isOnline ? 'Conectado (Nube)' : 'Desconectado'}</p>
+                  </div>
+                  <div className={member.isOnline ? 'led-green' : 'led-red'} style={{ width: '8px', height: '8px', borderRadius: '50%' }}></div>
                 </div>
-              </div>
-            );
-          })}
-          {messages.length === 0 && <p style={{ textAlign: 'center', opacity: 0.5, marginTop: '50px' }}>No hay mensajes. Usa el PTT para enviar un audio táctico o fotos.</p>}
+              ))
+            )}
+          </div>
         </div>
 
-        {/* Input Area WhatsApp Style */}
-        <div style={{ padding: '20px', background: 'rgba(255,255,255,0.05)', display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <input type="file" ref={fileInputRef} accept="image/*" style={{ display: 'none' }} onChange={handleImageSelect} />
-          <input type="file" ref={cameraInputRef} accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleImageSelect} />
-
-          {/* Si está grabando, oculta los botones de foto e input de texto */}
-          {isRecording ? (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <button onClick={cancelRecording} style={{ background: 'none', border: 'none', color: '#ef4444', padding: '8px' }}>
-                <Trash size={20} />
-              </button>
-              <div style={{ flex: 1, color: '#4ade80', fontSize: '14px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span>Grabando Audio Táctico...</span>
-                <div className="eq-container">
-                  <div className="eq-bar" />
-                  <div className="eq-bar" />
-                  <div className="eq-bar" />
-                  <div className="eq-bar" />
-                  <div className="eq-bar" />
-                </div>
-              </div>
+        {/* Sección "Mi Perfil y Aplicación" */}
+        <div style={{ marginTop: 'auto', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '4px' }}>
+            {avatarBase64 ? (
+              <img src={avatarBase64} alt={userName} style={{ width: '40px', height: '40px', borderRadius: '50%', objectFit: 'cover', border: '2px solid #4ade80' }} />
+            ) : (
+              <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#4ade80', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '16px' }}>{userName.charAt(0).toUpperCase()}</div>
+            )}
+            <div style={{ flex: 1, textAlign: 'left' }}>
+              <p style={{ fontSize: '14px', fontWeight: 'bold', margin: 0 }}>{userName}</p>
+              <p style={{ fontSize: '12px', opacity: 0.6, margin: 0 }}>Rastreable (Hijo/a)</p>
             </div>
-          ) : (
-            <>
-              {/* Botón de Cámara Directa */}
-              <button onClick={() => cameraInputRef.current?.click()} style={{ background: 'none', border: 'none', color: '#ccc', padding: '6px' }} title="Hacer Foto">
-                <Camera size={22} />
-              </button>
-              {/* Botón de Galería */}
-              <button onClick={() => fileInputRef.current?.click()} style={{ background: 'none', border: 'none', color: '#ccc', padding: '6px' }} title="Elegir de Galería">
-                <Image size={22} />
-              </button>
-              <input type="text" value={textInput} onChange={(e) => setTextInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSendText()} placeholder="Mensaje rápido..." style={{ flex: 1, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', padding: '12px 16px', borderRadius: '24px', color: 'white', outline: 'none' }} />
-            </>
-          )}
+          </div>
 
-          {/* Botones de acción derecha (Mic / Enviar) */}
-          {!isRecording && !textInput.trim() ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {updateAvailable ? (
+              <a 
+                href={latestReleaseUrl} 
+                target="_blank" 
+                rel="noreferrer"
+                className="glass-btn" 
+                style={{ background: 'rgba(236,72,153,0.2)', border: '1px solid #ec4899', color: '#f472b6', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '10px 14px', fontSize: '13px' }}
+              >
+                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f472b6', animation: 'pulse 1s infinite' }} />
+                ¡Nueva Versión {updateAvailable} Lista!
+              </a>
+            ) : (
+              <button 
+                onClick={() => checkUpdates()} 
+                disabled={isCheckingUpdates}
+                className="glass-btn secondary" 
+                style={{ fontSize: '13px', padding: '10px 14px' }}
+              >
+                {isCheckingUpdates ? 'Buscando...' : 'Buscar Actualización'}
+              </button>
+            )}
+
+            {updateCheckResult === 'no_updates' && (
+              <p style={{ fontSize: '11px', color: '#4ade80', margin: '4px 0 0 0' }}>✓ La aplicación está al día v1.0.0</p>
+            )}
+            {updateCheckResult === 'error' && (
+              <p style={{ fontSize: '11px', color: '#fca5a5', margin: '4px 0 0 0' }}>❌ Error al consultar actualizaciones.</p>
+            )}
+
             <button 
-              onClick={toggleRecording} 
-              style={{ background: 'rgba(139,92,246,0.3)', border: 'none', color: '#a78bfa', width: '44px', height: '44px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              className="glass-btn secondary" 
+              style={{ border: '1px solid rgba(239, 68, 68, 0.3)', color: '#fca5a5', background: 'rgba(239, 68, 68, 0.05)', fontSize: '13px', padding: '10px 14px' }}
+              onClick={() => setIsUnlinkModalOpen(true)}
             >
-              <Mic size={20} />
+              <LogOut size={16} /> Desvincular Dispositivo
             </button>
-          ) : (
-            <button 
-              onClick={isRecording ? toggleRecording : handleSendText} 
-              style={{ background: '#4ade80', border: 'none', color: '#0f172a', width: '44px', height: '44px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', animation: isRecording ? 'pulse-green 1s infinite' : 'none' }}
-            >
-              <Send size={18} />
-            </button>
-          )}
+          </div>
         </div>
       </div>
 
-      {/* Modal de Desvinculación de Emergencia con Doble Confirmación */}
+      {/* UNLINK CONFIRMATION MODAL */}
       {isUnlinkModalOpen && (
-        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <div style={{ background: 'rgba(30, 41, 59, 0.8)', border: '1px solid rgba(255, 255, 255, 0.1)', padding: '24px', borderRadius: '24px', width: '100%', maxWidth: '400px', display: 'flex', flexDirection: 'column', gap: '16px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)' }}>
-            <h3 style={{ margin: 0, fontSize: '18px', color: '#f87171', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <ShieldAlert size={24} /> Desvincular Dispositivo
-            </h3>
-            <p style={{ fontSize: '14px', margin: 0, opacity: 0.8, lineHeight: 1.5 }}>
-              ⚠️ Esta acción cortará el enlace de seguridad P2P permanente 24/7 con su familiar.
-            </p>
-            <p style={{ fontSize: '14px', margin: 0, opacity: 0.9 }}>
-              Escriba su nombre de usuario registrado <strong>({userName})</strong> para confirmar:
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
+          <div className="glass-panel" style={{ width: '100%', maxWidth: '340px', padding: '24px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <h3 style={{ fontSize: '18px', color: '#fca5a5', margin: 0 }}>Confirmar Desvinculación</h3>
+            <p style={{ fontSize: '13px', opacity: 0.8, margin: 0 }}>
+              Para desvincularte del grupo familiar en la nube, escribe exactamente tu nombre de usuario <strong>{userName}</strong> a continuación:
             </p>
             <input 
               type="text" 
-              value={unlinkConfirmName} 
-              onChange={(e) => setUnlinkConfirmName(e.target.value)} 
-              placeholder="Escriba su nombre aquí" 
-              style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', padding: '12px 16px', borderRadius: '12px', color: 'white', outline: 'none', fontSize: '14px' }} 
+              value={unlinkConfirmName}
+              onChange={(e) => setUnlinkConfirmName(e.target.value)}
+              className="glass-input"
+              placeholder="Escribe tu nombre de usuario"
+              style={{ margin: 0 }}
             />
-            <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
+            <div style={{ display: 'flex', gap: '10px' }}>
               <button 
-                onClick={() => setIsUnlinkModalOpen(false)} 
-                style={{ flex: 1, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '12px', borderRadius: '12px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}
-              >
-                Cancelar
-              </button>
-              <button 
-                onClick={confirmLogout} 
-                disabled={unlinkConfirmName.trim() !== userName.trim()} 
-                style={{ 
-                  flex: 1, 
-                  background: unlinkConfirmName.trim() === userName.trim() ? '#ef4444' : 'rgba(239, 68, 68, 0.2)', 
-                  border: 'none', 
-                  color: unlinkConfirmName.trim() === userName.trim() ? 'white' : 'rgba(255,255,255,0.3)', 
-                  padding: '12px', 
-                  borderRadius: '12px', 
-                  fontSize: '14px', 
-                  fontWeight: 'bold', 
-                  cursor: unlinkConfirmName.trim() === userName.trim() ? 'pointer' : 'not-allowed',
-                  transition: 'background 0.3s'
-                }}
+                onClick={confirmLogout}
+                disabled={unlinkConfirmName.trim() !== userName.trim()}
+                className="glass-btn primary"
+                style={{ flex: 1, background: '#ef4444', borderColor: '#ef4444', opacity: unlinkConfirmName.trim() === userName.trim() ? 1 : 0.4 }}
               >
                 Desvincular
               </button>
+              <button 
+                onClick={() => { setIsUnlinkModalOpen(false); setUnlinkConfirmName(''); }}
+                className="glass-btn secondary"
+                style={{ flex: 1 }}
+              >
+                Cancelar
+              </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* PANEL DE CHAT TÁCTICO */}
+      {isChatOpen && (
+        <div className="tactical-chat-overlay" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15, 12, 41, 0.95)', zIndex: 9999, display: 'flex', flexDirection: 'column' }}>
+          <div className="chat-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+            <h3 style={{ fontSize: '18px', margin: 0, color: 'white', display: 'flex', alignItems: 'center', gap: '8px' }}><MessageSquare size={20} color="#ec4899" /> Chat Familiar</h3>
+            <button className="icon-btn" onClick={() => setIsChatOpen(false)}><X size={24} /></button>
+          </div>
+
+          <div ref={chatScrollRef} className="chat-messages" style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {messages.length === 0 ? (
+              <div style={{ margin: 'auto', opacity: 0.5, fontSize: '14px' }}>Historial vacío. Envía un mensaje táctico.</div>
+            ) : (
+              messages.map(m => {
+                const isMe = m.senderName === userName;
+                return (
+                  <div key={m.id} style={{ alignSelf: isMe ? 'flex-end' : 'flex-start', maxWidth: '75%', display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
+                    <span style={{ fontSize: '10px', opacity: 0.5, marginBottom: '2px' }}>{m.senderName}</span>
+                    <div style={{ background: isMe ? '#8b5cf6' : 'rgba(255,255,255,0.1)', padding: '10px 14px', borderRadius: '16px', border: isMe ? 'none' : '1px solid rgba(255,255,255,0.1)', color: 'white', fontSize: '14px', textAlign: 'left', wordBreak: 'break-word' }}>
+                      {m.type === 'TEXT' && m.content}
+                      {m.type === 'IMAGE' && <img src={m.content} alt="Image" style={{ maxWidth: '100%', borderRadius: '10px', display: 'block' }} />}
+                      {m.type === 'AUDIO' && (
+                        <audio src={m.content} controls style={{ maxWidth: '180px', height: '36px' }} />
+                      )}
+                    </div>
+                    <span style={{ fontSize: '9px', opacity: 0.4, marginTop: '2px' }}>{new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          <div className="chat-input-area" style={{ padding: '16px', background: 'rgba(0,0,0,0.4)', borderTop: '1px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              accept="image/*" 
+              onChange={handleFileChange} 
+              style={{ display: 'none' }} 
+            />
+            <input 
+              type="file" 
+              ref={cameraInputRef} 
+              accept="image/*" 
+              capture="environment" 
+              onChange={handleFileChange} 
+              style={{ display: 'none' }} 
+            />
+
+            <button 
+              className="chat-action-btn"
+              onClick={() => cameraInputRef.current?.click()}
+              title="Tomar Foto"
+              style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: 'white', width: '40px', height: '40px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+            >
+              <Camera size={18} />
+            </button>
+            <button 
+              className="chat-action-btn"
+              onClick={() => fileInputRef.current?.click()}
+              title="Adjuntar Imagen"
+              style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: 'white', width: '40px', height: '40px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+            >
+              <Image size={18} />
+            </button>
+
+            <input 
+              type="text" 
+              value={textInput} 
+              onChange={(e) => setTextInput(e.target.value)} 
+              placeholder="Mensaje..." 
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSendText(); }}
+              className="glass-input"
+              style={{ flex: 1, margin: 0, padding: '8px 16px', fontSize: '14px' }}
+            />
+
+            {textInput.trim() ? (
+              <button 
+                onClick={handleSendText}
+                style={{ background: '#ec4899', border: 'none', color: 'white', width: '40px', height: '40px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+              >
+                <Send size={18} />
+              </button>
+            ) : (
+              <button 
+                onMouseDown={toggleRecording} 
+                onMouseUp={toggleRecording}
+                onTouchStart={toggleRecording}
+                onTouchEnd={toggleRecording}
+                disabled={isProcessingMic}
+                style={{ background: isRecording ? '#ef4444' : 'rgba(255,255,255,0.1)', border: 'none', color: 'white', width: '40px', height: '40px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', position: 'relative' }}
+              >
+                <Mic size={18} />
+                {isRecording && <span style={{ position: 'absolute', top: '-10px', right: '-10px', background: '#ef4444', borderRadius: '50%', width: '12px', height: '12px', animation: 'pulse 1s infinite' }} />}
+              </button>
+            )}
           </div>
         </div>
       )}

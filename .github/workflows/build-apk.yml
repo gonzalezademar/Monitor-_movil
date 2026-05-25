@@ -34,6 +34,9 @@ jobs:
       # 4. Compilar la app web (sin base URL de GitHub Pages, usa ./)
       - name: 🔨 Compilar aplicación web para Capacitor
         run: npm run build
+        env:
+          VITE_SUPABASE_URL: https://azahxvyukjoayjazguik.supabase.co
+          VITE_SUPABASE_ANON_KEY: sb_publishable_kPA1kTqNgDi0amrtgWvDlg_nU7qLH94
 
       # 5. Configurar Java 17 (requerido por Gradle/Android)
       - name: ☕ Configurar Java 17

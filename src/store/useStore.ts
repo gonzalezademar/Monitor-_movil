@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { supabase } from '../supabaseClient';
 
 export interface ChatMessage {
   id: string;
@@ -45,19 +46,30 @@ interface AppState {
   updateCheckResult: 'no_updates' | 'found' | 'error' | null;
   checkUpdates: () => Promise<void>;
   resetUpdateCheckResult: () => void;
+
+  // Supabase Authentication & Session State
+  userId: string | null;
+  userEmail: string | null;
+  familyId: string | null;
+  signIn: (email: string, password: string) => Promise<{ error: string | null }>;
+  signUp: (email: string, password: string, name: string, role: 'monitor' | 'client', avatar: string | null) => Promise<{ error: string | null }>;
+  signOut: () => Promise<void>;
+  resetPassword: (email: string) => Promise<{ error: string | null }>;
+  joinFamily: (familyCode: string) => Promise<{ error: string | null }>;
+  loadSession: () => Promise<void>;
 }
 
 
 export const useStore = create<AppState>()(
   persist(
-    (set) => ({
-      role: null,
+    (set, get) => ({
+      role: null as 'monitor' | 'client' | null,
       userName: '',
-      avatarBase64: null,
-      masterServerId: null,
-      myPeerId: null,
-      familyCode: null,
-      tutorSlot: null,
+      avatarBase64: null as string | null,
+      masterServerId: null as string | null,
+      myPeerId: null as string | null,
+      familyCode: null as string | null,
+      tutorSlot: null as 'T1' | 'T2' | null,
       setRole: (role) => set({ role }),
       setUserName: (name) => set({ userName: name }),
       setAvatar: (base64) => set({ avatarBase64: base64 }),
@@ -70,8 +82,8 @@ export const useStore = create<AppState>()(
       fenceRadius: 100,
       setFenceRadius: (r) => set({ fenceRadius: r }),
       
-      messages: [],
-      offlineQueue: [],
+      messages: [] as ChatMessage[],
+      offlineQueue: [] as any[],
       addMessage: (msg) => set((state) => ({ messages: [...state.messages, msg].slice(-15) })), // Keep last 15
       cleanOldMessages: () => set((state) => ({ 
          messages: state.messages.filter(m => Date.now() - m.timestamp < 24 * 60 * 60 * 1000) 
@@ -79,12 +91,11 @@ export const useStore = create<AppState>()(
       enqueueOfflineAction: (action) => set((state) => ({ offlineQueue: [...state.offlineQueue, action] })),
       clearOfflineQueue: () => set({ offlineQueue: [] }),
 
-      logout: () => set({ role: null, userName: '', avatarBase64: null, masterServerId: null, myPeerId: null, familyCode: null, tutorSlot: null, isSOSActive: false, fenceRadius: 100, messages: [], offlineQueue: [] }),
       appVersion: '1.0.0',
-      updateAvailable: null,
+      updateAvailable: null as string | null,
       latestReleaseUrl: '',
       isCheckingUpdates: false,
-      updateCheckResult: null,
+      updateCheckResult: null as 'no_updates' | 'found' | 'error' | null,
       resetUpdateCheckResult: () => set({ updateCheckResult: null }),
       checkUpdates: async () => {
         set({ isCheckingUpdates: true, updateCheckResult: null });
@@ -146,16 +157,195 @@ export const useStore = create<AppState>()(
           console.log('Error checking updates:', e);
           set({ isCheckingUpdates: false, updateCheckResult: 'error' });
         }
+      },
+
+      // Supabase Authentication & Session State
+      userId: null as string | null,
+      userEmail: null as string | null,
+      familyId: null as string | null,
+
+      loadSession: async () => {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session && session.user) {
+          const u = session.user;
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', u.id)
+            .single();
+
+          if (profile) {
+            set({
+              userId: u.id,
+              userEmail: u.email || null,
+              userName: profile.name,
+              avatarBase64: profile.avatar,
+              role: profile.role,
+              familyCode: profile.family_id,
+              familyId: profile.family_id,
+              masterServerId: profile.family_id,
+            });
+          }
+        }
+      },
+
+      signIn: async (email, password) => {
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) return { error: error.message };
+        
+        if (data.user) {
+          const u = data.user;
+          const { data: profile, error: profErr } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', u.id)
+            .single();
+
+          if (profErr) return { error: "No se encontró el perfil de usuario." };
+
+          set({
+            userId: u.id,
+            userEmail: u.email || null,
+            userName: profile.name,
+            avatarBase64: profile.avatar,
+            role: profile.role,
+            familyCode: profile.family_id,
+            familyId: profile.family_id,
+            masterServerId: profile.family_id,
+          });
+        }
+        return { error: null };
+      },
+
+      signUp: async (email, password, name, role, avatar) => {
+        const { data, error } = await supabase.auth.signUp({ email, password });
+        if (error) return { error: error.message };
+
+        if (data.user) {
+          const u = data.user;
+          let newFamilyId: string | null = null;
+
+          if (role === 'monitor') {
+            const { data: family, error: famErr } = await supabase
+              .from('families')
+              .insert({})
+              .select()
+              .single();
+
+            if (famErr) return { error: "Error al crear el grupo familiar." };
+            newFamilyId = family.id;
+          }
+
+          const { error: profErr } = await supabase
+            .from('profiles')
+            .insert({
+              id: u.id,
+              email: u.email,
+              name,
+              role,
+              avatar,
+              family_id: newFamilyId
+            });
+
+          if (profErr) return { error: "Error al guardar perfil de usuario: " + profErr.message };
+
+          if (role === 'monitor' && newFamilyId) {
+            await supabase.from('alerts').insert({
+              family_id: newFamilyId,
+              is_sos_active: false,
+              siren_active: false
+            });
+          }
+
+          set({
+            userId: u.id,
+            userEmail: u.email || null,
+            userName: name,
+            avatarBase64: avatar,
+            role,
+            familyCode: newFamilyId,
+            familyId: newFamilyId,
+            masterServerId: newFamilyId,
+          });
+        }
+        return { error: null };
+      },
+
+      signOut: async () => {
+        await supabase.auth.signOut();
+        set({
+          role: null,
+          userName: '',
+          avatarBase64: null,
+          masterServerId: null,
+          myPeerId: null,
+          familyCode: null,
+          tutorSlot: null,
+          isSOSActive: false,
+          fenceRadius: 100,
+          messages: [],
+          offlineQueue: [],
+          userId: null,
+          userEmail: null,
+          familyId: null
+        });
+      },
+
+      logout: () => {
+        get().signOut();
+      },
+
+      resetPassword: async (email) => {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: window.location.origin + '/reset-password',
+        });
+        if (error) return { error: error.message };
+        return { error: null };
+      },
+
+      joinFamily: async (familyCode) => {
+        const userId = get().userId;
+        if (!userId) return { error: "No hay sesión iniciada." };
+
+        const { data: family, error: famErr } = await supabase
+          .from('families')
+          .select('id')
+          .eq('id', familyCode)
+          .single();
+
+        if (famErr || !family) {
+          return { error: "Código de familia inválido o inexistente." };
+        }
+
+        const { error: profErr } = await supabase
+          .from('profiles')
+          .update({ family_id: familyCode })
+          .eq('id', userId);
+
+        if (profErr) return { error: "No se pudo actualizar el vínculo: " + profErr.message };
+
+        set({
+          familyCode,
+          familyId: familyCode,
+          masterServerId: familyCode
+        });
+
+        return { error: null };
       }
     }),
     {
       name: 'radar-storage',
       partialize: (state) => ({
-        ...state,
-        messages: state.messages.map(m => 
-          m.type === 'AUDIO' ? { ...m, type: 'TEXT', content: '[Audio caducado por ahorro de memoria]' } :
-          m.type === 'IMAGE' ? { ...m, type: 'TEXT', content: '[Imagen caducada por ahorro de memoria]' } : m
-        )
+        role: state.role,
+        userName: state.userName,
+        avatarBase64: state.avatarBase64,
+        masterServerId: state.masterServerId,
+        familyCode: state.familyCode,
+        userId: state.userId,
+        userEmail: state.userEmail,
+        familyId: state.familyId,
+        fenceRadius: state.fenceRadius,
+        appVersion: state.appVersion
       })
     }
   )
@@ -169,7 +359,6 @@ export const playTonalSound = (type: 'CHAT_RECEIVE' | 'P2P_HANDSHAKE' | 'P2P_LOS
     const ctx = (window as any).globalAudioCtx;
     if (!ctx) return;
     
-    // Auto-resume if context was suspended by browser autoplays
     if (ctx.state === 'suspended') {
       ctx.resume();
     }
@@ -244,7 +433,6 @@ export const playTonalSound = (type: 'CHAT_RECEIVE' | 'P2P_HANDSHAKE' | 'P2P_LOS
   }
 };
 
-// Desbloqueador nativo en interacción de usuario para Web Audio API
 const unlockAudio = () => {
   if (!(window as any).globalAudioCtx) {
     (window as any).globalAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -266,4 +454,3 @@ if (typeof window !== 'undefined') {
   document.addEventListener('click', unlockAudio);
   document.addEventListener('touchstart', unlockAudio);
 }
-
