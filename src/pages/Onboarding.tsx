@@ -35,7 +35,7 @@ const translateError = (err: string): string => {
 };
 
 export default function Onboarding() {
-  const { role, familyCode, signIn, signUp, joinFamily, loadSession, resetPassword } = useStore();
+  const { role, familyCode, signIn, signUp, joinFamily, loadSession, resetPassword, logout } = useStore();
   const navigate = useNavigate();
 
   // Mode state: 'welcome' | 'login' | 'signup' | 'forgot' | 'scan' | 'show_qr'
