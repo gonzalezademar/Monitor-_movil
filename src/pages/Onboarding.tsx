@@ -7,6 +7,29 @@ import { Scanner } from '@yudiel/react-qr-scanner';
 import { ShieldAlert, User, QrCode, ArrowLeft, Camera, RefreshCcw, Radar, Mail, Lock, Eye, EyeOff, Clock, MapPin } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
 
+const translateError = (err: string): string => {
+  const e = err.toLowerCase();
+  if (e.includes('already exists') || e.includes('already registered')) {
+    return 'Este correo electrónico ya está registrado.';
+  }
+  if (e.includes('at least 6 characters') || e.includes('should be at least 6')) {
+    return 'La contraseña debe tener al menos 6 caracteres.';
+  }
+  if (e.includes('invalid format') || e.includes('unable to validate email') || e.includes('invalid email')) {
+    return 'El correo electrónico ingresado no tiene un formato válido.';
+  }
+  if (e.includes('invalid login credentials')) {
+    return 'El correo o la contraseña son incorrectos.';
+  }
+  if (e.includes('email not confirmed')) {
+    return 'Debes confirmar tu correo electrónico. Por favor, revisa tu bandeja de entrada.';
+  }
+  if (e.includes('network error') || e.includes('fetch')) {
+    return 'Error de conexión. Verifica tu internet e intenta de nuevo.';
+  }
+  return err;
+};
+
 export default function Onboarding() {
   const { role, familyCode, signIn, signUp, joinFamily, loadSession, resetPassword } = useStore();
   const navigate = useNavigate();
@@ -85,7 +108,7 @@ export default function Onboarding() {
     const { error } = await signIn(emailInput, passwordInput);
     setIsLoading(false);
     if (error) {
-      setFormError(error);
+      setFormError(translateError(error));
     }
   };
 
@@ -103,7 +126,7 @@ export default function Onboarding() {
     setIsLoading(false);
     
     if (error) {
-      setFormError(error);
+      setFormError(translateError(error));
     } else {
       if (selectedRole === 'monitor') {
         setMode('show_qr');
@@ -126,7 +149,7 @@ export default function Onboarding() {
     setIsLoading(false);
 
     if (error) {
-      setFormError(error);
+      setFormError(translateError(error));
     } else {
       setSuccessMessage('Se ha enviado un enlace para restablecer tu contraseña a tu correo.');
       setTimeout(() => {
@@ -420,17 +443,29 @@ export default function Onboarding() {
                   type="button" 
                   onClick={() => setSelectedRole('monitor')}
                   className={`glass-btn ${selectedRole === 'monitor' ? 'primary' : 'secondary'}`} 
-                  style={{ flex: 1, padding: '8px', fontSize: '13px' }}
+                  style={{ 
+                    flex: 1, 
+                    padding: '8px', 
+                    fontSize: '13px',
+                    border: selectedRole === 'monitor' ? '2px solid #a78bfa' : '1px solid rgba(255,255,255,0.1)',
+                    boxShadow: selectedRole === 'monitor' ? '0 0 12px rgba(167, 139, 250, 0.4)' : 'none'
+                  }}
                 >
-                  <QrCode size={14} /> Tutor / Padre
+                  <QrCode size={14} /> {selectedRole === 'monitor' ? '✓ Tutor / Padre' : 'Tutor / Padre'}
                 </button>
                 <button 
                   type="button" 
                   onClick={() => setSelectedRole('client')}
                   className={`glass-btn ${selectedRole === 'client' ? 'primary' : 'secondary'}`} 
-                  style={{ flex: 1, padding: '8px', fontSize: '13px' }}
+                  style={{ 
+                    flex: 1, 
+                    padding: '8px', 
+                    fontSize: '13px',
+                    border: selectedRole === 'client' ? '2px solid #a78bfa' : '1px solid rgba(255,255,255,0.1)',
+                    boxShadow: selectedRole === 'client' ? '0 0 12px rgba(167, 139, 250, 0.4)' : 'none'
+                  }}
                 >
-                  <User size={14} /> Rastreable
+                  <User size={14} /> {selectedRole === 'client' ? '✓ Rastreable' : 'Rastreable'}
                 </button>
               </div>
             </div>
