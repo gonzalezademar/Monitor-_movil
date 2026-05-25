@@ -253,8 +253,8 @@ export default function Onboarding() {
                   <MapPin size={16} />
                 </div>
                 <div className="feature-card-content">
-                  <h3>Cuidado en Tiempo Real</h3>
-                  <p>Sigue los pasos de tus hijos o adultos mayores con un mapa interactivo inteligente.</p>
+                  <h3>Rastreo Activo</h3>
+                  <p>Tu familia siempre en el mapa.</p>
                 </div>
               </div>
 
@@ -263,8 +263,8 @@ export default function Onboarding() {
                   <Clock size={16} />
                 </div>
                 <div className="feature-card-content">
-                  <h3>Zonas de Alerta Segura</h3>
-                  <p>Entérate al instante si entran o salen de la escuela, el hogar o áreas seguras.</p>
+                  <h3>Zonas Seguras</h3>
+                  <p>Avisos automáticos de llegada.</p>
                 </div>
               </div>
 
@@ -273,8 +273,8 @@ export default function Onboarding() {
                   <ShieldAlert size={16} style={{ color: '#ef4444' }} />
                 </div>
                 <div className="feature-card-content">
-                  <h3>Auxilio SOS Inmediato</h3>
-                  <p>Botón de pánico silencioso con envío de ubicación, audio y video en vivo en emergencias.</p>
+                  <h3>Botón SOS</h3>
+                  <p>Ubicación, audio y video en vivo.</p>
                 </div>
               </div>
             </div>
