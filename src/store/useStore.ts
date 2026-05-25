@@ -199,9 +199,61 @@ export const useStore = create<AppState>()(
             .from('profiles')
             .select('*')
             .eq('id', u.id)
-            .single();
+            .maybeSingle();
 
-          if (profErr) return { error: "No se encontró el perfil de usuario." };
+          if (profErr || !profile) {
+            // Profile is missing! Let's auto-create a default profile to heal this user
+            let defaultFamilyId: string | null = null;
+            
+            // Try to create a family first
+            const { data: family, error: famErr } = await supabase
+              .from('families')
+              .insert({})
+              .select()
+              .single();
+            
+            if (!famErr && family) {
+              defaultFamilyId = family.id;
+            }
+
+            const defaultName = u.email ? u.email.split('@')[0] : 'Usuario';
+            
+            const { error: insertErr } = await supabase
+              .from('profiles')
+              .insert({
+                id: u.id,
+                email: u.email,
+                name: defaultName,
+                role: 'monitor',
+                avatar: null,
+                family_id: defaultFamilyId
+              });
+
+            if (insertErr) {
+              return { error: "No se encontró el perfil y no pudo ser auto-creado: " + insertErr.message };
+            }
+
+            if (defaultFamilyId) {
+              await supabase.from('alerts').insert({
+                family_id: defaultFamilyId,
+                is_sos_active: false,
+                siren_active: false
+              });
+            }
+
+            set({
+              userId: u.id,
+              userEmail: u.email || null,
+              userName: defaultName,
+              avatarBase64: null,
+              role: 'monitor',
+              familyCode: defaultFamilyId,
+              familyId: defaultFamilyId,
+              masterServerId: defaultFamilyId,
+            });
+
+            return { error: null };
+          }
 
           set({
             userId: u.id,
@@ -218,13 +270,60 @@ export const useStore = create<AppState>()(
       },
 
       signUp: async (email, password, name, role, avatar) => {
-        const { data, error } = await supabase.auth.signUp({ email, password });
-        if (error) return { error: error.message };
+        let signUpData;
+        let signUpError;
+        
+        // 1. Attempt to sign up the user
+        const res = await supabase.auth.signUp({ email, password });
+        signUpData = res.data;
+        signUpError = res.error;
 
-        if (data.user) {
-          const u = data.user;
+        let user = signUpData?.user;
+
+        // 2. If it fails with "already registered", try to sign in and heal the profile
+        if (signUpError && (
+          signUpError.message.toLowerCase().includes('already exists') || 
+          signUpError.message.toLowerCase().includes('already registered') ||
+          signUpError.message.toLowerCase().includes('use another email') ||
+          (signUpError as any).status === 422
+        )) {
+          // Attempt sign in with the provided password
+          const signInRes = await supabase.auth.signInWithPassword({ email, password });
+          if (signInRes.error) {
+            return { error: "Este correo ya está registrado con otra contraseña." };
+          }
+          user = signInRes.data.user;
+        } else if (signUpError) {
+          return { error: signUpError.message };
+        }
+
+        if (user) {
+          const u = user;
           let newFamilyId: string | null = null;
 
+          // Check if profile already exists
+          const { data: existingProfile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', u.id)
+            .maybeSingle();
+
+          if (existingProfile) {
+            // Profile already exists! Just load it
+            set({
+              userId: u.id,
+              userEmail: u.email || null,
+              userName: existingProfile.name,
+              avatarBase64: existingProfile.avatar,
+              role: existingProfile.role,
+              familyCode: existingProfile.family_id,
+              familyId: existingProfile.family_id,
+              masterServerId: existingProfile.family_id,
+            });
+            return { error: null };
+          }
+
+          // Profile does not exist, create it!
           if (role === 'monitor') {
             const { data: family, error: famErr } = await supabase
               .from('families')
@@ -232,7 +331,7 @@ export const useStore = create<AppState>()(
               .select()
               .single();
 
-            if (famErr) return { error: "Error al crear el grupo familiar." };
+            if (famErr) return { error: "Error al crear el grupo familiar: " + famErr.message };
             newFamilyId = family.id;
           }
 
