@@ -54,6 +54,7 @@ export default function ClientDashboard() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [mapCenterTarget, setMapCenterTarget] = useState<[number, number] | null>(null);
   const [mapTheme, setMapTheme] = useState<'dark' | 'light'>('dark');
+  const [trackingTargetId, setTrackingTargetId] = useState<string>('me');
 
   const audioCtxRef = useRef<AudioContext | null>(null);
   const oscillatorRef = useRef<OscillatorNode | null>(null);
@@ -512,6 +513,20 @@ export default function ClientDashboard() {
     };
   }, [userName, avatarBase64]);
 
+  // Auto-centrado reactivo según el objetivo de seguimiento
+  useEffect(() => {
+    if (!trackingTargetId) return;
+    if (trackingTargetId === 'me') {
+      if (myLocation) {
+        setMapCenterTarget(myLocation);
+      }
+    } else if (trackingTargetId === 'monitor') {
+      if (monitorLocation) {
+        setMapCenterTarget([monitorLocation.lat, monitorLocation.lng]);
+      }
+    }
+  }, [trackingTargetId, myLocation, monitorLocation]);
+
   // SOS status
   useEffect(() => {
     if (isSOSActive) {
@@ -816,6 +831,43 @@ export default function ClientDashboard() {
         {mapTheme === 'dark' ? <Sun size={24} /> : <Moon size={24} />}
       </button>
 
+      {/* Panel flotante de Avatares para Seguimiento */}
+      <div className="map-avatars-container">
+        <button 
+          className={`map-avatar-btn ${trackingTargetId === 'me' ? 'active' : ''}`}
+          onClick={() => {
+            setTrackingTargetId('me');
+            if (myLocation) {
+              setMapCenterTarget(myLocation);
+            }
+          }}
+          title="Centrar en mí"
+        >
+          {avatarBase64 ? (
+            <img src={avatarBase64} alt="Yo" />
+          ) : (
+            <div className="map-avatar-placeholder">{userName.charAt(0).toUpperCase()}</div>
+          )}
+        </button>
+
+        {monitorLocation && (
+          <button
+            className={`map-avatar-btn ${trackingTargetId === 'monitor' ? 'active' : ''} monitor`}
+            onClick={() => {
+              setTrackingTargetId('monitor');
+              setMapCenterTarget([monitorLocation.lat, monitorLocation.lng]);
+            }}
+            title="Seguir al Monitor (Padre)"
+          >
+            {monitorLocation.avatar ? (
+              <img src={monitorLocation.avatar} alt="Monitor" />
+            ) : (
+              <div className="map-avatar-placeholder">M</div>
+            )}
+          </button>
+        )}
+      </div>
+
       {/* Alerta de Alarma Remota del Padre */}
       {isRemoteAlarmActive && (
         <div style={{ position: 'absolute', top: 80, left: '50%', transform: 'translateX(-50%)', zIndex: 9999, background: '#ef4444', color: 'white', padding: '16px 24px', borderRadius: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', boxShadow: '0 8px 32px rgba(239, 68, 68, 0.4)', animation: 'pulse 1.5s infinite' }}>
@@ -885,7 +937,7 @@ export default function ClientDashboard() {
             <button className="icon-btn" onClick={() => setIsMenuOpen(false)} style={{ marginRight: '-8px' }}><X size={24} /></button>
           </div>
           <div style={{ paddingLeft: '4px', width: '100%' }}>
-            <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '120px' }} />
+            <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '150px' }} />
           </div>
         </div>
 

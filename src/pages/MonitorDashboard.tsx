@@ -940,7 +940,7 @@ export default function MonitorDashboard() {
             <button className="icon-btn" onClick={() => setIsMenuOpen(false)} style={{ marginRight: '-8px' }}><X size={24} /></button>
           </div>
           <div style={{ paddingLeft: '4px', width: '100%' }}>
-            <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '120px' }} />
+            <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '150px' }} />
           </div>
         </div>
         

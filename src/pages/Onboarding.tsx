@@ -301,7 +301,7 @@ export default function Onboarding() {
       </div>
       
       <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-        <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '150px' }} />
+        <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '185px' }} />
         <p style={{ fontSize: '10px', opacity: 0.6, margin: 0 }}>Seguridad Táctica P2P 🛡️</p>
       </div>
     </div>
