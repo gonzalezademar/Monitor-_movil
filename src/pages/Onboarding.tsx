@@ -8,26 +8,30 @@ import { ShieldAlert, User, QrCode, ArrowLeft, Camera, RefreshCcw, Radar, Mail, 
 import { Geolocation } from '@capacitor/geolocation';
 
 const translateError = (err: string): string => {
+  if (!err) return '';
   const e = err.toLowerCase();
+  let translated = err;
+  
   if (e.includes('already exists') || e.includes('already registered')) {
-    return 'Este correo electrónico ya está registrado.';
+    translated = 'Este correo electrónico ya está registrado.';
+  } else if (e.includes('at least 6 characters') || e.includes('should be at least 6')) {
+    translated = 'La contraseña debe tener al menos 6 caracteres.';
+  } else if (e.includes('invalid format') || e.includes('unable to validate email') || e.includes('invalid email')) {
+    translated = 'El correo electrónico ingresado no tiene un formato válido.';
+  } else if (e.includes('invalid login credentials')) {
+    translated = 'El correo o la contraseña son incorrectos.';
+  } else if (e.includes('email not confirmed')) {
+    translated = 'Debes confirmar tu correo electrónico. Por favor, revisa tu bandeja de entrada.';
+  } else if (e.includes('rate limit')) {
+    translated = 'Límite de solicitudes alcanzado. Por favor, espera un momento.';
+  } else if (e.includes('network error') || e.includes('fetch')) {
+    translated = 'Error de conexión. Verifica tu conexión a internet o si un bloqueador (como Brave Shields) está interfiriendo.';
   }
-  if (e.includes('at least 6 characters') || e.includes('should be at least 6')) {
-    return 'La contraseña debe tener al menos 6 caracteres.';
+
+  if (translated === err) {
+    return err;
   }
-  if (e.includes('invalid format') || e.includes('unable to validate email') || e.includes('invalid email')) {
-    return 'El correo electrónico ingresado no tiene un formato válido.';
-  }
-  if (e.includes('invalid login credentials')) {
-    return 'El correo o la contraseña son incorrectos.';
-  }
-  if (e.includes('email not confirmed')) {
-    return 'Debes confirmar tu correo electrónico. Por favor, revisa tu bandeja de entrada.';
-  }
-  if (e.includes('network error') || e.includes('fetch')) {
-    return 'Error de conexión. Verifica tu internet e intenta de nuevo.';
-  }
-  return err;
+  return `${translated} (${err})`;
 };
 
 export default function Onboarding() {
