@@ -283,6 +283,7 @@ export default function MonitorDashboard() {
   useEffect(() => {
     if (!masterServerId) return;
 
+    checkUpdates();
     const myTutorId = `${masterServerId}-${tutorSlot || 'T1'}`;
     console.log("Inicializando Peer de Tutor en:", myTutorId);
 
@@ -506,7 +507,7 @@ export default function MonitorDashboard() {
       peer.destroy();
       stopSiren();
     };
-  }, [masterServerId, myLocation, localRadius, addMessage]);
+  }, [masterServerId, myLocation, localRadius, addMessage, checkUpdates]);
 
   useEffect(() => {
     const interval = setInterval(() => {

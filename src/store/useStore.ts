@@ -91,7 +91,15 @@ export const useStore = create<AppState>()(
         try {
           const response = await fetch('https://api.github.com/repos/gonzalezademar/Monitor-_movil/releases/latest');
           if (!response.ok) {
-            set({ isCheckingUpdates: false, updateCheckResult: 'error' });
+            if (response.status === 404) {
+              set({ 
+                updateAvailable: null,
+                updateCheckResult: 'no_updates',
+                isCheckingUpdates: false
+              });
+            } else {
+              set({ isCheckingUpdates: false, updateCheckResult: 'error' });
+            }
             return;
           }
           const data = await response.json();

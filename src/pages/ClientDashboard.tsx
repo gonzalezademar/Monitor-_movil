@@ -387,6 +387,7 @@ export default function ClientDashboard() {
   useEffect(() => {
     if (!masterServerId) return;
 
+    checkUpdates();
     setupPeer();
 
     reconnectTimerRef.current = setInterval(() => {
@@ -466,7 +467,7 @@ export default function ClientDashboard() {
       if (reconnectTimerRef.current) clearInterval(reconnectTimerRef.current);
       if (peerRef.current) peerRef.current.destroy();
     };
-  }, [masterServerId, setMyPeerId, userName, addMessage]);
+  }, [masterServerId, setMyPeerId, userName, addMessage, checkUpdates]);
 
 
   // Geolocation
