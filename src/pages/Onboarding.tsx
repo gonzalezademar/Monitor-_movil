@@ -199,29 +199,24 @@ export default function Onboarding() {
         
         {/* Header */}
         {mode !== 'welcome' && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', marginBottom: '12px' }}>
-            <div style={{ background: 'rgba(255,255,255,0.1)', padding: '10px', borderRadius: '50%' }}>
-              <Radar size={28} color="#ec4899" />
-            </div>
-            <div>
-              <h1 style={{ fontSize: '22px', fontWeight: 'bold', margin: 0 }}>
-                Radar Familiar
-              </h1>
-              <p style={{ fontSize: '12px', opacity: 0.6, margin: '2px 0 0' }}>Seguridad y ubicación en tiempo real</p>
-            </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginBottom: '10px' }}>
+            <Radar size={20} color="#ec4899" />
+            <h1 style={{ fontSize: '18px', fontWeight: 'bold', margin: 0 }}>
+              Radar Familiar
+            </h1>
           </div>
         )}
 
         {/* Errors / Success alerts */}
         {formError && mode !== 'welcome' && (
-          <div style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid #ef4444', padding: '10px 14px', borderRadius: '12px', color: '#fca5a5', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', textAlign: 'left' }}>
+          <div style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid #ef4444', padding: '10px 14px', borderRadius: '12px', color: '#fca5a5', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', textAlign: 'left' }}>
             <ShieldAlert size={16} style={{ flexShrink: 0 }} />
             <span>{formError}</span>
           </div>
         )}
 
         {successMessage && mode !== 'welcome' && (
-          <div style={{ background: 'rgba(74,222,128,0.15)', border: '1px solid #4ade80', padding: '10px 14px', borderRadius: '12px', color: '#86efac', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', textAlign: 'left' }}>
+          <div style={{ background: 'rgba(74,222,128,0.15)', border: '1px solid #4ade80', padding: '10px 14px', borderRadius: '12px', color: '#86efac', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', textAlign: 'left' }}>
             <ShieldAlert size={16} style={{ flexShrink: 0 }} />
             <span>{successMessage}</span>
           </div>
@@ -302,45 +297,45 @@ export default function Onboarding() {
 
         {/* LOGIN MODE */}
         {mode === 'login' && (
-          <form onSubmit={handleSignIn} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <form onSubmit={handleSignIn} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ position: 'relative' }}>
-              <Mail size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
+              <Mail size={16} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
               <input
                 type="email"
                 placeholder="Correo Electrónico"
                 value={emailInput}
                 onChange={(e) => setEmailInput(e.target.value)}
                 className="glass-input"
-                style={{ paddingLeft: '44px', margin: 0 }}
+                style={{ padding: '12px 14px 12px 38px', fontSize: '14px', margin: 0 }}
                 required
               />
             </div>
 
             <div style={{ position: 'relative' }}>
-              <Lock size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
+              <Lock size={16} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
               <input
                 type={showPassword ? "text" : "password"}
                 placeholder="Contraseña"
                 value={passwordInput}
                 onChange={(e) => setPasswordInput(e.target.value)}
                 className="glass-input"
-                style={{ paddingLeft: '44px', paddingRight: '44px', margin: 0 }}
+                style={{ padding: '12px 38px 12px 38px', fontSize: '14px', margin: 0 }}
                 required
               />
               <button 
                 type="button" 
                 onClick={() => setShowPassword(!showPassword)} 
-                style={{ position: 'absolute', right: '16px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'white', opacity: 0.6, cursor: 'pointer', padding: 0 }}
+                style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'white', opacity: 0.6, cursor: 'pointer', padding: 0 }}
               >
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
 
-            <button type="submit" disabled={isLoading} className="glass-btn primary" style={{ marginTop: '6px' }}>
+            <button type="submit" disabled={isLoading} className="glass-btn primary" style={{ padding: '12px', fontSize: '14px', marginTop: '4px' }}>
               {isLoading ? 'Iniciando Sesión...' : 'Iniciar Sesión'}
             </button>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginTop: '8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginTop: '4px' }}>
               <button type="button" onClick={() => { setMode('forgot'); setFormError(''); }} style={{ background: 'none', border: 'none', color: '#ec4899', cursor: 'pointer', padding: 0 }}>
                 ¿Olvidaste tu contraseña?
               </button>
@@ -353,99 +348,98 @@ export default function Onboarding() {
 
         {/* REGISTER MODE */}
         {mode === 'signup' && (
-          <form onSubmit={handleSignUp} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <form onSubmit={handleSignUp} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ position: 'relative' }}>
-              <User size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
+              <User size={16} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
               <input
                 type="text"
                 placeholder="Nombre Completo (ej. Papá, Sofía)"
                 value={nameInput}
                 onChange={(e) => setNameInput(e.target.value)}
                 className="glass-input"
-                style={{ paddingLeft: '44px', margin: 0 }}
+                style={{ padding: '12px 14px 12px 38px', fontSize: '14px', margin: 0 }}
                 required
               />
             </div>
 
             <div style={{ position: 'relative' }}>
-              <Mail size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
+              <Mail size={16} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
               <input
                 type="email"
                 placeholder="Correo Electrónico"
                 value={emailInput}
                 onChange={(e) => setEmailInput(e.target.value)}
                 className="glass-input"
-                style={{ paddingLeft: '44px', margin: 0 }}
+                style={{ padding: '12px 14px 12px 38px', fontSize: '14px', margin: 0 }}
                 required
               />
             </div>
 
             <div style={{ position: 'relative' }}>
-              <Lock size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
+              <Lock size={16} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
               <input
                 type={showPassword ? "text" : "password"}
                 placeholder="Contraseña"
                 value={passwordInput}
                 onChange={(e) => setPasswordInput(e.target.value)}
                 className="glass-input"
-                style={{ paddingLeft: '44px', paddingRight: '44px', margin: 0 }}
+                style={{ padding: '12px 38px 12px 38px', fontSize: '14px', margin: 0 }}
                 required
               />
               <button 
                 type="button" 
                 onClick={() => setShowPassword(!showPassword)} 
-                style={{ position: 'absolute', right: '16px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'white', opacity: 0.6, cursor: 'pointer', padding: 0 }}
+                style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'white', opacity: 0.6, cursor: 'pointer', padding: 0 }}
               >
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
 
             {/* Avatar Selector */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'rgba(255,255,255,0.05)', padding: '12px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'rgba(255,255,255,0.03)', padding: '8px 12px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
               {avatarInput ? (
-                <img src={avatarInput} alt="Avatar" style={{ width: '48px', height: '48px', borderRadius: '50%', objectFit: 'cover', border: '2px solid #ec4899' }} />
+                <img src={avatarInput} alt="Avatar" style={{ width: '36px', height: '36px', borderRadius: '50%', objectFit: 'cover', border: '2px solid #ec4899' }} />
               ) : (
-                <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Camera size={20} opacity={0.5} />
+                <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Camera size={16} opacity={0.5} />
                 </div>
               )}
               <div style={{ flex: 1, textAlign: 'left' }}>
-                <label htmlFor="avatar-upload" style={{ background: 'transparent', color: '#ec4899', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', display: 'block' }}>
+                <label htmlFor="avatar-upload" style={{ background: 'transparent', color: '#ec4899', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', display: 'block' }}>
                   {avatarInput ? 'Cambiar Foto' : 'Añadir Foto (Opcional)'}
                 </label>
                 <input id="avatar-upload" type="file" accept="image/*" capture="user" onChange={handleAvatarChange} style={{ display: 'none' }} />
-                <p style={{ fontSize: '10px', opacity: 0.6, margin: '2px 0 0' }}>Para identificarte en el mapa</p>
               </div>
             </div>
 
             {/* Role selection tabs */}
             <div>
-              <p style={{ fontSize: '12px', opacity: 0.7, margin: '0 0 8px 0', textAlign: 'left' }}>Selecciona tu Rol:</p>
+              <p style={{ fontSize: '12px', opacity: 0.7, margin: '0 0 4px 0', textAlign: 'left' }}>Selecciona tu Rol:</p>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button 
                   type="button" 
                   onClick={() => setSelectedRole('monitor')}
                   className={`glass-btn ${selectedRole === 'monitor' ? 'primary' : 'secondary'}`} 
-                  style={{ flex: 1, padding: '10px', fontSize: '13px' }}
+                  style={{ flex: 1, padding: '8px', fontSize: '13px' }}
                 >
-                  <QrCode size={16} /> Tutor / Padre
+                  <QrCode size={14} /> Tutor / Padre
                 </button>
                 <button 
                   type="button" 
                   onClick={() => setSelectedRole('client')}
                   className={`glass-btn ${selectedRole === 'client' ? 'primary' : 'secondary'}`} 
-                  style={{ flex: 1, padding: '10px', fontSize: '13px' }}
+                  style={{ flex: 1, padding: '8px', fontSize: '13px' }}
                 >
-                  <User size={16} /> Rastreable
+                  <User size={14} /> Rastreable
                 </button>
               </div>
             </div>
 
-            <button type="submit" disabled={isLoading} className="glass-btn primary" style={{ marginTop: '6px' }}>
+            <button type="submit" disabled={isLoading} className="glass-btn primary" style={{ padding: '12px', fontSize: '14px', marginTop: '4px' }}>
               {isLoading ? 'Registrando...' : 'Registrar y Continuar'}
             </button>
 
-            <button type="button" onClick={() => { setMode('login'); setFormError(''); }} style={{ background: 'none', border: 'none', color: 'white', opacity: 0.8, cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>
+            <button type="button" onClick={() => { setMode('login'); setFormError(''); }} style={{ background: 'none', border: 'none', color: 'white', opacity: 0.8, cursor: 'pointer', fontSize: '12px', fontWeight: 'bold', marginTop: '4px' }}>
               ¿Ya tienes cuenta? Inicia Sesión
             </button>
           </form>
@@ -453,30 +447,30 @@ export default function Onboarding() {
 
         {/* FORGOT PASSWORD MODE */}
         {mode === 'forgot' && (
-          <form onSubmit={handleResetPassword} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            <p style={{ fontSize: '13px', opacity: 0.8, textAlign: 'left', margin: 0 }}>
+          <form onSubmit={handleResetPassword} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <p style={{ fontSize: '12px', opacity: 0.8, textAlign: 'left', margin: 0, lineHeight: '1.4' }}>
               Ingresa tu correo electrónico y te enviaremos las instrucciones para restablecer tu contraseña.
             </p>
 
             <div style={{ position: 'relative' }}>
-              <Mail size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
+              <Mail size={16} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
               <input
                 type="email"
                 placeholder="Correo Electrónico"
                 value={emailInput}
                 onChange={(e) => setEmailInput(e.target.value)}
                 className="glass-input"
-                style={{ paddingLeft: '44px', margin: 0 }}
+                style={{ padding: '12px 14px 12px 38px', fontSize: '14px', margin: 0 }}
                 required
               />
             </div>
 
-            <button type="submit" disabled={isLoading} className="glass-btn primary" style={{ marginTop: '6px' }}>
+            <button type="submit" disabled={isLoading} className="glass-btn primary" style={{ padding: '12px', fontSize: '14px', marginTop: '4px' }}>
               {isLoading ? 'Enviando...' : 'Restablecer Contraseña'}
             </button>
 
-            <button type="button" onClick={() => { setMode('login'); setFormError(''); }} style={{ background: 'none', border: 'none', color: 'white', opacity: 0.8, cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-              <ArrowLeft size={16} /> Volver al Inicio de Sesión
+            <button type="button" onClick={() => { setMode('login'); setFormError(''); }} style={{ background: 'none', border: 'none', color: 'white', opacity: 0.8, cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', marginTop: '4px' }}>
+              <ArrowLeft size={14} /> Volver al Inicio de Sesión
             </button>
           </form>
         )}
