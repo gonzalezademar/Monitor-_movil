@@ -48,11 +48,13 @@ export default function Onboarding() {
   const [nameInput, setNameInput] = useState('');
   const [avatarInput, setAvatarInput] = useState<string | null>(null);
   const [selectedRole, setSelectedRole] = useState<'monitor' | 'client'>('monitor');
+  const [manualCodeInput, setManualCodeInput] = useState('');
 
   // Error and UI state
   const [formError, setFormError] = useState('');
   const [cameraError, setCameraError] = useState('');
   const [scanError, setScanError] = useState(false);
+  const [isCameraActive, setIsCameraActive] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
 
@@ -190,6 +192,24 @@ export default function Onboarding() {
     if (cameraErrorTimerRef.current) clearTimeout(cameraErrorTimerRef.current);
     setCameraError('No se pudo acceder a la cámara. Revisa los permisos e intenta de nuevo.');
     cameraErrorTimerRef.current = setTimeout(() => setCameraError(''), 5000);
+  };
+
+  const handleManualLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualCodeInput.trim()) {
+      setFormError('Por favor ingrese el código de vinculación.');
+      return;
+    }
+    setFormError('');
+    setIsLoading(true);
+    const { error } = await joinFamily(manualCodeInput.trim());
+    setIsLoading(false);
+
+    if (!error) {
+      navigate('/client');
+    } else {
+      setFormError(translateError(error));
+    }
   };
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -577,7 +597,12 @@ export default function Onboarding() {
             
             <div style={{ background: 'white', padding: '16px', borderRadius: '16px', display: 'inline-block', boxShadow: '0 4px 20px rgba(0,0,0,0.2)' }}>
               {familyCode ? (
-                <QRCode value={familyCode} size={180} />
+                <>
+                  <QRCode value={familyCode} size={180} />
+                  <p style={{ color: 'black', fontSize: '11px', margin: '8px 0 0 0', fontWeight: 'bold', wordBreak: 'break-all' }}>
+                    Código Manual: {familyCode}
+                  </p>
+                </>
               ) : (
                 <div style={{ width: '180px', height: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444' }}>Cargando QR...</div>
               )}
@@ -593,43 +618,96 @@ export default function Onboarding() {
 
         {/* SCAN QR MODE (Client needs to link family) */}
         {mode === 'scan' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', alignItems: 'center', width: '100%' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', alignItems: 'center', width: '100%' }}>
             <div>
               <h3 style={{ fontSize: '18px', margin: 0 }}>Vincular con Tutor</h3>
-              <p style={{ fontSize: '13px', opacity: 0.7, margin: '4px 0 0' }}>
-                Apunta tu cámara al código QR en la pantalla del Tutor/Padre:
+              <p style={{ fontSize: '12px', opacity: 0.7, margin: '4px 0 0', lineHeight: 1.4 }}>
+                Para conectar tu dispositivo, escanea el código QR del Tutor/Padre o ingresa el código manual.
               </p>
             </div>
 
-            {cameraError ? (
-              <div className="error-card" style={{ width: '100%' }}>
-                <Camera size={32} color="#fca5a5" />
-                <p style={{ color: '#fca5a5', fontSize: '13px', margin: '8px 0' }}>
-                  No se pudo abrir la cámara. Por favor asegúrate de otorgar los permisos.
+            {/* QR Scanner Activation */}
+            {!isCameraActive ? (
+              <button 
+                type="button" 
+                onClick={() => { setCameraError(''); setIsCameraActive(true); }} 
+                className="glass-btn primary" 
+                style={{ background: 'linear-gradient(90deg, #ec4899 0%, #8b5cf6 100%)', display: 'flex', alignItems: 'center', gap: '8px', padding: '14px', fontSize: '14px', margin: '4px 0' }}
+              >
+                <Camera size={18} /> Activar Cámara y Escanear QR
+              </button>
+            ) : cameraError ? (
+              <div className="error-card" style={{ width: '100%', padding: '14px' }}>
+                <Camera size={24} color="#fca5a5" />
+                <p style={{ color: '#fca5a5', fontSize: '12px', margin: '4px 0' }}>
+                  No se pudo abrir la cámara. Revisa los permisos de tu dispositivo.
                 </p>
-                <button 
-                  type="button"
-                  className="glass-btn secondary" 
-                  style={{ fontSize: '14px', border: '1px solid rgba(252, 165, 165, 0.4)', color: '#fca5a5' }} 
-                  onClick={() => setCameraError('')}
-                >
-                  <RefreshCcw size={14} /> Reintentar
-                </button>
+                <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
+                  <button 
+                    type="button"
+                    className="glass-btn secondary" 
+                    style={{ fontSize: '12px', padding: '8px', flex: 1 }} 
+                    onClick={() => { setCameraError(''); }}
+                  >
+                    <RefreshCcw size={12} /> Reintentar
+                  </button>
+                  <button 
+                    type="button"
+                    className="glass-btn secondary" 
+                    style={{ fontSize: '12px', padding: '8px', flex: 1, borderColor: 'rgba(255,255,255,0.2)' }} 
+                    onClick={() => setIsCameraActive(false)}
+                  >
+                    Cerrar
+                  </button>
+                </div>
               </div>
             ) : (
-              <div style={{ width: '100%', maxWidth: '250px', borderRadius: '16px', overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.2)' }}>
-                <Scanner onScan={handleScan} onError={handleScanError} />
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: '8px' }}>
+                <div style={{ width: '100%', maxWidth: '200px', borderRadius: '16px', overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.2)', aspectRatio: '1/1' }}>
+                  <Scanner onScan={handleScan} onError={handleScanError} />
+                </div>
+                <button 
+                  type="button" 
+                  onClick={() => setIsCameraActive(false)} 
+                  className="glass-btn secondary" 
+                  style={{ padding: '6px 12px', fontSize: '12px', width: 'auto', border: '1px solid rgba(255,255,255,0.2)' }}
+                >
+                  Apagar Cámara
+                </button>
               </div>
             )}
 
             {scanError && (
-              <div style={{ background: 'rgba(252,165,165,0.1)', padding: '10px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <ShieldAlert size={16} color="#fca5a5" />
-                <span style={{ color: '#fca5a5', fontSize: '13px' }}>QR inválido: Asegúrese de escanear el del Tutor.</span>
+              <div style={{ background: 'rgba(252,165,165,0.1)', padding: '8px 12px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <ShieldAlert size={14} color="#fca5a5" />
+                <span style={{ color: '#fca5a5', fontSize: '12px' }}>QR inválido: Asegúrese de escanear el del Tutor.</span>
               </div>
             )}
 
-            <button type="button" onClick={() => { setMode('login'); }} className="glass-btn secondary" style={{ opacity: 0.8 }}>
+            {/* Manual Link Input */}
+            <div style={{ width: '100%', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '14px', display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
+              <p style={{ fontSize: '12px', opacity: 0.7, margin: 0, textAlign: 'left' }}>O ingresa el código manual del Tutor:</p>
+              <form onSubmit={handleManualLink} style={{ display: 'flex', gap: '8px' }}>
+                <input 
+                  type="text" 
+                  placeholder="Pegar código de familia (UUID)" 
+                  value={manualCodeInput}
+                  onChange={(e) => setManualCodeInput(e.target.value)}
+                  className="glass-input" 
+                  style={{ padding: '10px 12px', fontSize: '13px', margin: 0, flex: 1 }}
+                />
+                <button 
+                  type="submit" 
+                  className="glass-btn primary" 
+                  style={{ width: 'auto', padding: '10px 16px', fontSize: '13px', margin: 0 }}
+                  disabled={isLoading}
+                >
+                  Vincular
+                </button>
+              </form>
+            </div>
+
+            <button type="button" onClick={() => { logout(); navigate('/'); }} className="glass-btn secondary" style={{ opacity: 0.8, padding: '10px', fontSize: '13px', marginTop: '8px' }}>
               Cerrar Sesión / Volver
             </button>
           </div>
