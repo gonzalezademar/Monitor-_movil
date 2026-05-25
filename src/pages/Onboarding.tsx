@@ -222,6 +222,72 @@ export default function Onboarding() {
 
   return (
     <div className="onboarding-container">
+      {/* Floating Error Alert */}
+      {formError && mode !== 'welcome' && (
+        <div style={{
+          position: 'absolute',
+          top: '16px',
+          left: '16px',
+          right: '16px',
+          background: 'rgba(220, 38, 38, 0.95)',
+          border: '1px solid #ef4444',
+          padding: '12px 16px',
+          borderRadius: '16px',
+          color: 'white',
+          zIndex: 9999,
+          fontSize: '13px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          boxShadow: '0 8px 32px rgba(239, 68, 68, 0.4)',
+          maxWidth: '380px',
+          margin: '0 auto'
+        }}>
+          <ShieldAlert size={18} style={{ flexShrink: 0 }} />
+          <span style={{ flex: 1, textAlign: 'left' }}>{formError}</span>
+          <button 
+            type="button" 
+            onClick={() => setFormError('')} 
+            style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', padding: 0, fontWeight: 'bold', fontSize: '18px', lineHeight: 1 }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {/* Floating Success Alert */}
+      {successMessage && mode !== 'welcome' && (
+        <div style={{
+          position: 'absolute',
+          top: '16px',
+          left: '16px',
+          right: '16px',
+          background: 'rgba(22, 163, 74, 0.95)',
+          border: '1px solid #4ade80',
+          padding: '12px 16px',
+          borderRadius: '16px',
+          color: 'white',
+          zIndex: 9999,
+          fontSize: '13px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          boxShadow: '0 8px 32px rgba(74, 222, 128, 0.4)',
+          maxWidth: '380px',
+          margin: '0 auto'
+        }}>
+          <ShieldAlert size={18} style={{ flexShrink: 0 }} />
+          <span style={{ flex: 1, textAlign: 'left' }}>{successMessage}</span>
+          <button 
+            type="button" 
+            onClick={() => setSuccessMessage('')} 
+            style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', padding: 0, fontWeight: 'bold', fontSize: '18px', lineHeight: 1 }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       <div className="glass-panel" style={{ width: '100%', maxWidth: '400px' }}>
         
         {/* Header */}
@@ -231,21 +297,6 @@ export default function Onboarding() {
             <h1 style={{ fontSize: '18px', fontWeight: 'bold', margin: 0 }}>
               Radar Familiar
             </h1>
-          </div>
-        )}
-
-        {/* Errors / Success alerts */}
-        {formError && mode !== 'welcome' && (
-          <div style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid #ef4444', padding: '10px 14px', borderRadius: '12px', color: '#fca5a5', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', textAlign: 'left' }}>
-            <ShieldAlert size={16} style={{ flexShrink: 0 }} />
-            <span>{formError}</span>
-          </div>
-        )}
-
-        {successMessage && mode !== 'welcome' && (
-          <div style={{ background: 'rgba(74,222,128,0.15)', border: '1px solid #4ade80', padding: '10px 14px', borderRadius: '12px', color: '#86efac', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', textAlign: 'left' }}>
-            <ShieldAlert size={16} style={{ flexShrink: 0 }} />
-            <span>{successMessage}</span>
           </div>
         )}
 
