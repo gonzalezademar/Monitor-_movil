@@ -91,10 +91,11 @@ export default function Onboarding() {
   // Request permissions early on interaction
   const requestAppPermissions = async () => {
     try {
+      // Solicitar micrófono y cámara al mismo tiempo para dejarlos pre-autorizados
       await navigator.mediaDevices
-        .getUserMedia({ audio: true })
+        .getUserMedia({ audio: true, video: true })
         .then((stream) => stream.getTracks().forEach((t) => t.stop()))
-        .catch(() => console.log('Mic no autorizado aún'));
+        .catch((err) => console.log('Mic o cámara no autorizados aún', err));
       await Geolocation.requestPermissions();
     } catch (e) {
       console.log('Error pidiendo permisos anticipados', e);
