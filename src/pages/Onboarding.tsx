@@ -195,21 +195,16 @@ export default function Onboarding() {
 
   return (
     <div className="onboarding-container">
-      {/* Brand logo at the very top */}
-      <div style={{ marginBottom: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '190px' }} />
-      </div>
-
       <div className="glass-panel" style={{ width: '100%', maxWidth: '400px' }}>
         
         {/* Header */}
         {mode !== 'welcome' && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
-            <div style={{ background: 'rgba(255,255,255,0.1)', padding: '12px', borderRadius: '50%' }}>
-              <Radar size={32} color="#ec4899" />
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', marginBottom: '12px' }}>
+            <div style={{ background: 'rgba(255,255,255,0.1)', padding: '10px', borderRadius: '50%' }}>
+              <Radar size={28} color="#ec4899" />
             </div>
             <div>
-              <h1 style={{ fontSize: '24px', fontWeight: 'bold', margin: 0 }}>
+              <h1 style={{ fontSize: '22px', fontWeight: 'bold', margin: 0 }}>
                 Radar Familiar
               </h1>
               <p style={{ fontSize: '12px', opacity: 0.6, margin: '2px 0 0' }}>Seguridad y ubicación en tiempo real</p>
@@ -219,14 +214,14 @@ export default function Onboarding() {
 
         {/* Errors / Success alerts */}
         {formError && mode !== 'welcome' && (
-          <div style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid #ef4444', padding: '10px 14px', borderRadius: '12px', color: '#fca5a5', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', textAlign: 'left' }}>
+          <div style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid #ef4444', padding: '10px 14px', borderRadius: '12px', color: '#fca5a5', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', textAlign: 'left' }}>
             <ShieldAlert size={16} style={{ flexShrink: 0 }} />
             <span>{formError}</span>
           </div>
         )}
 
         {successMessage && mode !== 'welcome' && (
-          <div style={{ background: 'rgba(74,222,128,0.15)', border: '1px solid #4ade80', padding: '10px 14px', borderRadius: '12px', color: '#86efac', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', textAlign: 'left' }}>
+          <div style={{ background: 'rgba(74,222,128,0.15)', border: '1px solid #4ade80', padding: '10px 14px', borderRadius: '12px', color: '#86efac', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', textAlign: 'left' }}>
             <ShieldAlert size={16} style={{ flexShrink: 0 }} />
             <span>{successMessage}</span>
           </div>
@@ -234,70 +229,72 @@ export default function Onboarding() {
 
         {/* WELCOME LANDING MODE */}
         {mode === 'welcome' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', alignItems: 'center', width: '100%' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'center', width: '100%' }}>
             <div className="welcome-radar-container">
               <div className="radar-ping"></div>
               <div className="radar-ping radar-ping-delay"></div>
               <div className="radar-core">
-                <Radar size={22} color="#fff" />
+                <Radar size={18} color="#fff" />
               </div>
             </div>
 
             <div style={{ textAlign: 'center' }}>
-              <h2 style={{ fontSize: '22px', fontWeight: 'bold', margin: 0, color: 'white', letterSpacing: '-0.3px' }}>
+              <h2 style={{ fontSize: '21px', fontWeight: 'bold', margin: 0, color: 'white', letterSpacing: '-0.3px' }}>
                 Radar Familiar
               </h2>
-              <p style={{ fontSize: '12px', opacity: 0.7, margin: '6px 0 0', lineHeight: '1.4' }}>
-                Tu red privada de geolocalización familiar y seguridad táctica 100% segura en la nube.
+              <p style={{ fontSize: '12px', opacity: 0.7, margin: '4px 0 0', lineHeight: '1.4' }}>
+                Protección invisible y paz mental para cuidar a tus hijos, abuelos y seres queridos en tiempo real.
               </p>
             </div>
 
             <div className="features-grid">
               <div className="feature-card">
                 <div className="feature-icon-wrapper">
-                  <MapPin size={18} />
+                  <MapPin size={16} />
                 </div>
                 <div className="feature-card-content">
-                  <h3>Ubicación Proactiva</h3>
-                  <p>Seguimiento cruzado en tiempo real con enfoque interactivo automático.</p>
+                  <h3>Cuidado en Tiempo Real</h3>
+                  <p>Sigue los pasos de tus hijos o adultos mayores con un mapa interactivo inteligente.</p>
                 </div>
               </div>
 
               <div className="feature-card">
                 <div className="feature-icon-wrapper">
-                  <Clock size={18} />
+                  <Clock size={16} />
                 </div>
                 <div className="feature-card-content">
-                  <h3>Historial Seguro (30d)</h3>
-                  <p>Consulta en todo momento el camino recorrido de tus hijos en los últimos 30 días.</p>
+                  <h3>Zonas de Alerta Segura</h3>
+                  <p>Entérate al instante si entran o salen de la escuela, el hogar o áreas seguras.</p>
                 </div>
               </div>
 
               <div className="feature-card">
                 <div className="feature-icon-wrapper">
-                  <ShieldAlert size={18} style={{ color: '#ef4444' }} />
+                  <ShieldAlert size={16} style={{ color: '#ef4444' }} />
                 </div>
                 <div className="feature-card-content">
-                  <h3>Alerta Táctica SOS</h3>
-                  <p>Modo de sigilo con pantalla apagada y pánico remoto silencioso de inmediato.</p>
+                  <h3>Auxilio SOS Inmediato</h3>
+                  <p>Botón de pánico silencioso con envío de ubicación, audio y video en vivo en emergencias.</p>
                 </div>
               </div>
             </div>
 
-            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '6px' }}>
+            <div style={{ width: '100%', display: 'flex', gap: '8px', marginTop: '4px' }}>
               <button 
+                type="button"
                 onClick={() => setMode('login')} 
                 className="glass-btn primary"
-                style={{ background: 'linear-gradient(90deg, #ec4899 0%, #8b5cf6 100%)', border: 'none', margin: 0 }}
+                style={{ background: 'linear-gradient(90deg, #ec4899 0%, #8b5cf6 100%)', border: 'none', margin: 0, flex: 1, padding: '12px 10px', fontSize: '14px' }}
               >
-                Ingresar a la App
+                Ingresar
               </button>
               <button 
+                type="button"
                 onClick={() => setMode('signup')} 
                 className="glass-btn secondary"
-                style={{ background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.15)', margin: 0 }}
+                style={{ background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.15)', margin: 0, flex: 1, padding: '12px 10px', fontSize: '14px' }}
               >
-                Crear una Cuenta
+                Crear Cuenta
               </button>
             </div>
           </div>
@@ -556,7 +553,8 @@ export default function Onboarding() {
 
       </div>
       
-      <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
+        <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '130px', opacity: 0.8 }} />
         <p style={{ fontSize: '10px', opacity: 0.5, margin: 0 }}>🛡️ Seguridad en la Nube con Supabase</p>
       </div>
     </div>
