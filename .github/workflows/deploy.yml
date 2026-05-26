@@ -35,8 +35,8 @@ jobs:
         run: npm run build
         env:
           VITE_BASE_URL: /Monitor-_movil/
-          VITE_SUPABASE_URL: https://azahxvyukjoayjazguik.supabase.co
-          VITE_SUPABASE_ANON_KEY: sb_publishable_kPA1kTqNgDi0amrtgWvDlg_nU7qLH94
+          VITE_SUPABASE_URL: https://ntacbbhtryyhxpnpycxc.supabase.co
+          VITE_SUPABASE_ANON_KEY: sb_publishable_gjcB-WqKu-DVqT-maSPf3g_nFPh49lR
 
       - name: Configurar GitHub Pages
         uses: actions/configure-pages@v4
