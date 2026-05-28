@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useStore, playTonalSound, type ChatMessage } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { QRCode } from 'react-qr-code';
-import { Menu, X, QrCode, LogOut, AlertCircle, ShieldAlert, Smartphone, MessageSquare, Send, Mic, Bell, Camera, Sun, Moon, Image, Clock } from 'lucide-react';
+import { Menu, X, QrCode, LogOut, AlertCircle, ShieldAlert, Smartphone, MessageSquare, Send, Mic, Bell, Camera, Sun, Moon, Image, Clock, Zap, Battery } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
 import { supabase } from '../supabaseClient';
 import developerLogo from '../assets/developer_logo.png';
@@ -62,7 +62,8 @@ export default function MonitorDashboard() {
     latestReleaseUrl, 
     isCheckingUpdates, 
     updateCheckResult, 
-    resetUpdateCheckResult 
+    resetUpdateCheckResult,
+    updateTrackingStatus
   } = useStore();
 
   const navigate = useNavigate();
@@ -85,7 +86,7 @@ export default function MonitorDashboard() {
   };
 
   const [myLocation, setMyLocation] = useState<[number, number] | null>(null);
-  const [clients, setClients] = useState<Record<string, { lat: number; lng: number; name: string, lastSeen: number, isOnline: boolean, avatar: string | null, role: 'monitor' | 'client' }>>({});
+  const [clients, setClients] = useState<Record<string, { lat: number; lng: number; name: string, lastSeen: number, isOnline: boolean, avatar: string | null, role: 'monitor' | 'client', tracking_enabled?: boolean }>>({});
   const [alarmActive, setAlarmActive] = useState<{ active: boolean; originName: string }>({ active: false, originName: '' });
   const [mapCenterTarget, setMapCenterTarget] = useState<[number, number] | null>(null);
   const [gpsError, setGpsError] = useState<string | null>(null);
@@ -93,13 +94,41 @@ export default function MonitorDashboard() {
   const [isSirenOn, setIsSirenOn] = useState(false);
   const [trackingTargetId, setTrackingTargetId] = useState<string>('me');
 
+  const toggleClientTracking = async (clientId: string, currentStatus: boolean) => {
+    setClients(prev => {
+      const updated = { ...prev };
+      if (updated[clientId]) {
+        updated[clientId] = {
+          ...updated[clientId],
+          tracking_enabled: !currentStatus
+        };
+      }
+      return updated;
+    });
+
+    const { error } = await updateTrackingStatus(clientId, !currentStatus);
+    if (error) {
+      setClients(prev => {
+        const updated = { ...prev };
+        if (updated[clientId]) {
+          updated[clientId] = {
+            ...updated[clientId],
+            tracking_enabled: currentStatus
+          };
+        }
+        return updated;
+      });
+      alert("Error al actualizar estado de rastreo: " + error);
+    }
+  };
+
   // History path coordinates
   const [historyPath, setHistoryPath] = useState<[number, number][]>([]);
   const [historyUser, setHistoryUser] = useState<string | null>(null);
 
   const markerIconCache = useRef<Record<string, L.DivIcon>>({});
   const getAvatarIcon = (id: string, avatar: string | null, isOnline: boolean, isMonitor: boolean) => {
-    const cacheKey = `${id}_${isOnline ? 'on' : 'off'}_${avatar ? 'avatar' : 'no_avatar'}_${isMonitor ? 'monitor' : 'client'}`;
+    const cacheKey = `${id}_${isOnline ? 'on' : 'off'}_${avatar || 'no_avatar'}_${isMonitor ? 'monitor' : 'client'}`;
     if (!markerIconCache.current[cacheKey]) {
       const size = isMonitor ? 36 : 40;
       const color = isMonitor ? '#c084fc' : (isOnline ? '#4ade80' : '#9ca3af');
@@ -193,6 +222,29 @@ export default function MonitorDashboard() {
     setAlarmActive({ active: false, originName: '' });
   };
 
+  useEffect(() => {
+    const requestAllPermissions = async () => {
+      try {
+        await Geolocation.requestPermissions();
+      } catch (e) {
+        console.warn("Could not request Geolocation permission via Capacitor:", e);
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        stream.getTracks().forEach(t => t.stop());
+      } catch (e) {
+        console.warn("Could not request Camera permission:", e);
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(t => t.stop());
+      } catch (e) {
+        console.warn("Could not request Microphone permission:", e);
+      }
+    };
+    requestAllPermissions();
+  }, []);
+
   // 1. Fetch details & Realtime Subscriptions
   useEffect(() => {
     if (!familyId || !userId) return;
@@ -238,7 +290,8 @@ export default function MonitorDashboard() {
               lat: 0,
               lng: 0,
               isOnline: false,
-              lastSeen: Date.now()
+              lastSeen: Date.now(),
+              tracking_enabled: p.tracking_enabled !== false
             };
           }
         });
@@ -269,9 +322,9 @@ export default function MonitorDashboard() {
       .channel(`alerts-${familyId}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'alerts', filter: `family_id=eq.${familyId}` },
+        { event: '*', schema: 'public', table: 'alerts' },
         (payload: any) => {
-          if (payload.new) {
+          if (payload.new && payload.new.family_id === familyId) {
             const data = payload.new;
             if (data.is_sos_active) {
               setAlarmActive({ active: true, originName: data.origin_name || 'Familiar' });
@@ -290,9 +343,9 @@ export default function MonitorDashboard() {
       .channel(`locations-${familyId}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'locations', filter: `family_id=eq.${familyId}` },
+        { event: '*', schema: 'public', table: 'locations' },
         (payload: any) => {
-          if (payload.new && payload.new.user_id !== userId) {
+          if (payload.new && payload.new.family_id === familyId && payload.new.user_id !== userId) {
             const row = payload.new;
             setClients(prev => {
               const updated = { ...prev };
@@ -336,14 +389,40 @@ export default function MonitorDashboard() {
       )
       .subscribe();
 
+    // Subscribe to Profiles (for remote tracking changes)
+    const profilesSub = supabase
+      .channel(`profiles-${familyId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'profiles' },
+        (payload: any) => {
+          if (payload.new && payload.new.family_id === familyId && payload.new.id !== userId) {
+            const row = payload.new;
+            setClients(prev => {
+              const updated = { ...prev };
+              if (updated[row.id]) {
+                updated[row.id] = {
+                  ...updated[row.id],
+                  name: row.name,
+                  avatar: row.avatar,
+                  tracking_enabled: row.tracking_enabled !== false
+                };
+              }
+              return updated;
+            });
+          }
+        }
+      )
+      .subscribe();
+
     // Subscribe to Messages
     const messagesSub = supabase
       .channel(`messages-${familyId}`)
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages', filter: `family_id=eq.${familyId}` },
+        { event: 'INSERT', schema: 'public', table: 'messages' },
         (payload: any) => {
-          if (payload.new && payload.new.sender_id !== userId) {
+          if (payload.new && payload.new.family_id === familyId && payload.new.sender_id !== userId) {
             const m = payload.new;
             addMessage({
               id: m.id,
@@ -362,19 +441,37 @@ export default function MonitorDashboard() {
     return () => {
       alertsSub.unsubscribe();
       locationsSub.unsubscribe();
+      profilesSub.unsubscribe();
       messagesSub.unsubscribe();
     };
   }, [familyId, userId, myLocation, localRadius, addMessage, checkUpdates]);
+
+  // Cleanup active timeouts/intervals on unmount to prevent state updates/audio leaks
+  useEffect(() => {
+    return () => {
+      stopSiren();
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    };
+  }, []);
+
+  // Auto scroll chat to bottom when messages list updates or chat is opened
+  useEffect(() => {
+    if (isChatOpen && chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [messages, isChatOpen]);
 
   // 2. Geolocation Watcher
   useEffect(() => {
     if (!userId || !familyId) return;
 
+    let active = true;
     let watchId: string | null = null;
     
     const startTracking = async () => {
       try {
         const perm = await Geolocation.requestPermissions();
+        if (!active) return;
         if (perm.location !== 'granted') {
           setGpsError("El GPS no tiene permisos. Actívalo en ajustes.");
           return;
@@ -384,7 +481,7 @@ export default function MonitorDashboard() {
         watchId = await Geolocation.watchPosition(
           { enableHighAccuracy: true, timeout: 10000 },
           (position) => {
-            if (position) {
+            if (position && active) {
               const coords: [number, number] = [position.coords.latitude, position.coords.longitude];
               setMyLocation(coords);
               
@@ -396,19 +493,23 @@ export default function MonitorDashboard() {
                 longitude: position.coords.longitude,
                 updated_at: new Date().toISOString()
               }).then(({ error }) => {
-                if (error) console.error("Error upserting location:", error);
+                if (error && active) console.error("Error upserting location:", error);
               });
             }
           }
         );
+        if (!active && watchId) {
+          Geolocation.clearWatch({ id: watchId });
+        }
       } catch (e) {
-        console.error('Error starting location watcher', e);
+        if (active) console.error('Error starting location watcher', e);
       }
     };
     
     startTracking();
     
     return () => {
+      active = false;
       if (watchId) Geolocation.clearWatch({ id: watchId });
     };
   }, [userId, familyId]);
@@ -506,7 +607,7 @@ export default function MonitorDashboard() {
     addMessage(msg);
     if (!familyId || !userId) return;
 
-    await supabase.from('messages').insert({
+    const { error } = await supabase.from('messages').insert({
       family_id: familyId,
       sender_id: userId,
       sender_name: userName,
@@ -514,6 +615,10 @@ export default function MonitorDashboard() {
       content: msg.content,
       timestamp: msg.timestamp
     });
+    if (error) {
+      console.error("Error inserting message to Supabase:", error);
+      showToast("❌ Error al enviar mensaje");
+    }
   };
 
   const handleSendText = () => {
@@ -551,7 +656,10 @@ export default function MonitorDashboard() {
     dispatchChatMessage(msg);
   };
 
-  const toggleRecording = async () => {
+  const toggleRecording = async (e?: React.MouseEvent | React.TouchEvent) => {
+    if (e && (e.type === 'touchstart' || e.type === 'touchend')) {
+      e.preventDefault();
+    }
     if (isRecording) {
       if (mediaRecorderRef.current) mediaRecorderRef.current.stop();
       setIsRecording(false);
@@ -638,7 +746,16 @@ export default function MonitorDashboard() {
         
         {myLocation && (
           <>
-            <Marker position={myLocation} icon={getAvatarIcon(userId || 'me', avatarBase64, true, true)}>
+            <Marker 
+              position={myLocation} 
+              icon={getAvatarIcon(userId || 'me', avatarBase64, true, true)}
+              eventHandlers={{
+                click: () => {
+                  setTrackingTargetId('me');
+                  setMapCenterTarget(myLocation);
+                }
+              }}
+            >
               <Popup>Tú (Padre / Tutor)</Popup>
             </Marker>
             <Circle center={myLocation} radius={localRadius} pathOptions={{ color: '#ec4899', fillColor: '#ec4899', fillOpacity: 0.08 }} />
@@ -648,7 +765,17 @@ export default function MonitorDashboard() {
         {Object.entries(clients).map(([id, client]) => {
           if (client.lat === 0 && client.lng === 0) return null;
           return (
-            <Marker key={id} position={[client.lat, client.lng]} icon={getAvatarIcon(id, client.avatar, client.isOnline, client.role === 'monitor')}>
+            <Marker 
+              key={id} 
+              position={[client.lat, client.lng]} 
+              icon={getAvatarIcon(id, client.avatar, client.isOnline, client.role === 'monitor')}
+              eventHandlers={{
+                click: () => {
+                  setTrackingTargetId(id);
+                  setMapCenterTarget([client.lat, client.lng]);
+                }
+              }}
+            >
               <Popup>{client.name} ({client.role === 'monitor' ? 'Tutor' : 'Hijo'})</Popup>
             </Marker>
           );
@@ -692,7 +819,7 @@ export default function MonitorDashboard() {
           {avatarBase64 ? (
             <img src={avatarBase64} alt="Yo" />
           ) : (
-            <div className="map-avatar-placeholder">{userName.charAt(0).toUpperCase()}</div>
+            <div className="map-avatar-placeholder">{(userName || '?').charAt(0).toUpperCase()}</div>
           )}
         </button>
 
@@ -711,7 +838,7 @@ export default function MonitorDashboard() {
             {client.avatar ? (
               <img src={client.avatar} alt={client.name} style={{ opacity: client.isOnline ? 1 : 0.5 }} />
             ) : (
-              <div className="map-avatar-placeholder" style={{ opacity: client.isOnline ? 1 : 0.5 }}>{client.name.charAt(0).toUpperCase()}</div>
+              <div className="map-avatar-placeholder" style={{ opacity: client.isOnline ? 1 : 0.5 }}>{(client.name || '?').charAt(0).toUpperCase()}</div>
             )}
           </button>
         ))}
@@ -759,7 +886,7 @@ export default function MonitorDashboard() {
             <button className="icon-btn" onClick={() => setIsMenuOpen(false)} style={{ marginRight: '-8px' }}><X size={24} /></button>
           </div>
           <div style={{ paddingLeft: '4px', width: '100%' }}>
-            <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '150px' }} />
+            <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '190px' }} />
           </div>
         </div>
         
@@ -778,7 +905,7 @@ export default function MonitorDashboard() {
                     {c.avatar ? (
                       <img src={c.avatar} alt={c.name} style={{ width: '32px', height: '32px', borderRadius: '50%', objectFit: 'cover' }} />
                     ) : (
-                      <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#a78bfa', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{c.name.charAt(0).toUpperCase()}</div>
+                      <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#a78bfa', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{(c.name || '?').charAt(0).toUpperCase()}</div>
                     )}
                     <div style={{ flex: 1, textAlign: 'left' }}>
                       <span style={{ fontSize: '14px', fontWeight: 'bold', display: 'block' }}>{c.name}</span>
@@ -787,8 +914,28 @@ export default function MonitorDashboard() {
                     <div className={c.isOnline ? 'led-green' : 'led-red'} style={{ width: '8px', height: '8px', borderRadius: '50%' }}></div>
                   </div>
                   
-                  {/* Historical route button */}
+                  {/* Remote tracking / battery toggle */}
                   <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                    <button 
+                      onClick={() => toggleClientTracking(id, c.tracking_enabled !== false)}
+                      className="glass-btn secondary"
+                      style={{ 
+                        fontSize: '11px', 
+                        padding: '6px 10px', 
+                        flex: 1, 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        justifyContent: 'center', 
+                        gap: '4px',
+                        background: c.tracking_enabled !== false ? 'rgba(74, 222, 128, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                        borderColor: c.tracking_enabled !== false ? 'rgba(74, 222, 128, 0.3)' : 'rgba(239, 68, 68, 0.3)',
+                        color: c.tracking_enabled !== false ? '#4ade80' : '#fca5a5'
+                      }}
+                      title={c.tracking_enabled !== false ? "Pausar rastreo GPS del hijo remotely (Ahorrar batería)" : "Re-activar rastreo GPS del hijo"}
+                    >
+                      {c.tracking_enabled !== false ? <Zap size={11} className="animate-pulse" /> : <Battery size={11} />}
+                      {c.tracking_enabled !== false ? 'GPS: Activo' : 'GPS: Suspendido'}
+                    </button>
                     <button 
                       onClick={() => showHistoricalRoute(id, c.name)}
                       className="glass-btn secondary"

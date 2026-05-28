@@ -716,9 +716,9 @@ export default function Onboarding() {
 
       </div>
       
-      <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
-        <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '130px', opacity: 0.8 }} />
-        <p style={{ fontSize: '10px', opacity: 0.5, margin: 0 }}>🛡️ Seguridad en la Nube con Supabase</p>
+      <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+        <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '190px', opacity: 1.0, filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.3))' }} />
+        <p style={{ fontSize: '11px', opacity: 0.7, margin: 0, color: '#a78bfa', fontWeight: '500' }}>🛡️ Seguridad en la Nube con Supabase</p>
       </div>
     </div>
   );

@@ -563,11 +563,11 @@ body {
 /* Marca de agua flotante en las esquinas de los Dashboards */
 .floating-brand-logo {
   position: absolute;
-  bottom: 80px;
+  bottom: 85px;
   right: 16px;
-  width: 125px;
+  width: 165px;
   z-index: 1000;
-  opacity: 0.82;
+  opacity: 0.95;
   pointer-events: auto;
   cursor: pointer;
   transition: opacity 0.2s, transform 0.2s;

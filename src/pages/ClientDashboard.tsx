@@ -1,12 +1,12 @@
 import { useStore, playTonalSound, type ChatMessage } from '../store/useStore';
-import { useNavigate } from 'react-router-dom';
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useMemo } from 'react';
 import { Geolocation } from '@capacitor/geolocation';
 import { MapContainer, TileLayer, Marker, useMap, Popup } from 'react-leaflet';
 import L from 'leaflet';
-import { ShieldAlert, Bell, MessageSquare, LogOut, Mic, Send, X, Camera, Menu, Smartphone, Sun, Moon, Image } from 'lucide-react';
+import { ShieldAlert, Bell, MessageSquare, LogOut, Mic, Send, X, Camera, Menu, Smartphone, Sun, Moon, Image, Radar, Zap, Battery } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import { supabase } from '../supabaseClient';
+import { Scanner } from '@yudiel/react-qr-scanner';
 
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
@@ -46,10 +46,11 @@ export default function ClientDashboard() {
     latestReleaseUrl, 
     isCheckingUpdates, 
     updateCheckResult, 
-    resetUpdateCheckResult 
+    resetUpdateCheckResult,
+    unlinkFamily,
+    joinFamily
   } = useStore();
 
-  const navigate = useNavigate();
   const openMenu = () => {
     resetUpdateCheckResult();
     setIsMenuOpen(true);
@@ -63,6 +64,17 @@ export default function ClientDashboard() {
   const [familyMembers, setFamilyMembers] = useState<Record<string, { name: string; avatar: string | null; role: 'monitor' | 'client'; lat: number; lng: number; isOnline: boolean }>>({});
   const [ghostModeActive, setGhostModeActive] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+  // Scanning / Linking State (for unlinked clients)
+  const [manualCodeInput, setManualCodeInput] = useState('');
+  const [formError, setFormError] = useState('');
+  const [cameraError, setCameraError] = useState('');
+  const [scanError, setScanError] = useState(false);
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  
+  // Battery / GPS active tracking status
+  const [trackingEnabled, setTrackingEnabled] = useState(true);
   const [mapCenterTarget, setMapCenterTarget] = useState<[number, number] | null>(null);
   const [mapTheme, setMapTheme] = useState<'dark' | 'light'>('dark');
   const [trackingTargetId, setTrackingTargetId] = useState<string>('me');
@@ -78,6 +90,35 @@ export default function ClientDashboard() {
   const [isProcessingMic, setIsProcessingMic] = useState(false);
   const [isUnlinkModalOpen, setIsUnlinkModalOpen] = useState(false);
   const [unlinkConfirmName, setUnlinkConfirmName] = useState('');
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  useEffect(() => {
+    const requestAllPermissions = async () => {
+      try {
+        await Geolocation.requestPermissions();
+      } catch (e) {
+        console.warn("Could not request Geolocation permission via Capacitor:", e);
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        stream.getTracks().forEach(t => t.stop());
+      } catch (e) {
+        console.warn("Could not request Camera permission:", e);
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(t => t.stop());
+      } catch (e) {
+        console.warn("Could not request Microphone permission:", e);
+      }
+    };
+    requestAllPermissions();
+  }, []);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const chatScrollRef = useRef<HTMLDivElement>(null);
@@ -89,20 +130,20 @@ export default function ClientDashboard() {
   const discardRecordingRef = useRef<boolean>(false);
 
   // Icons caching
-  const myIconRef = useRef(L.divIcon({ 
+  const myIcon = useMemo(() => L.divIcon({ 
     className: 'custom-avatar-marker', 
     html: avatarBase64 
       ? `<div style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid #4ade80;box-shadow:0 0 10px rgba(74,222,128,0.5);"><img src="${avatarBase64}" style="width:100%;height:100%;object-fit:cover;" /></div>` 
       : `<div style="width:24px;height:24px;background:#4ade80;border-radius:50%;border:2px solid white;"></div>`, 
     iconSize: [36, 36], 
     iconAnchor: [18, 18] 
-  }));
+  }), [avatarBase64]);
 
   const markerIconCache = useRef<Record<string, L.DivIcon>>({});
   const [gpsError, setGpsError] = useState<string | null>(null);
 
   const getAvatarIcon = (id: string, avatar: string | null, isOnline: boolean, isMonitor: boolean) => {
-    const key = `${id}-${avatar ? 'avatar' : 'noavatar'}-${isOnline ? 'on' : 'off'}`;
+    const key = `${id}-${avatar || 'noavatar'}-${isOnline ? 'on' : 'off'}`;
     if (!markerIconCache.current[key]) {
       const borderColor = isMonitor ? '#8b5cf6' : '#ec4899';
       const shadowColor = isMonitor ? 'rgba(139,92,246,0.4)' : 'rgba(236,72,153,0.4)';
@@ -243,9 +284,9 @@ export default function ClientDashboard() {
       .channel(`alerts-${familyId}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'alerts', filter: `family_id=eq.${familyId}` },
+        { event: '*', schema: 'public', table: 'alerts' },
         (payload: any) => {
-          if (payload.new) {
+          if (payload.new && payload.new.family_id === familyId) {
             const data = payload.new;
             // Listen to remote siren trigger (if active and triggered by another profile)
             if (data.siren_active && data.origin_user_id !== userId) {
@@ -263,9 +304,9 @@ export default function ClientDashboard() {
       .channel(`locations-${familyId}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'locations', filter: `family_id=eq.${familyId}` },
+        { event: '*', schema: 'public', table: 'locations' },
         (payload: any) => {
-          if (payload.new && payload.new.user_id !== userId) {
+          if (payload.new && payload.new.family_id === familyId && payload.new.user_id !== userId) {
             const row = payload.new;
             setFamilyMembers(prev => {
               if (prev[row.user_id]) {
@@ -291,9 +332,9 @@ export default function ClientDashboard() {
       .channel(`messages-${familyId}`)
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages', filter: `family_id=eq.${familyId}` },
+        { event: 'INSERT', schema: 'public', table: 'messages' },
         (payload: any) => {
-          if (payload.new && payload.new.sender_id !== userId) {
+          if (payload.new && payload.new.family_id === familyId && payload.new.sender_id !== userId) {
             const m = payload.new;
             addMessage({
               id: m.id,
@@ -302,6 +343,7 @@ export default function ClientDashboard() {
               content: m.content,
               timestamp: m.timestamp
             });
+            showToast(`💬 Mensaje de ${m.sender_name}`);
             playTonalSound('CHAT_RECEIVE');
           }
         }
@@ -315,15 +357,57 @@ export default function ClientDashboard() {
     };
   }, [familyId, userId, addMessage, checkUpdates]);
 
+  // 1b. Realtime subscription to child's own profile (listens for remote tracking toggle)
+  useEffect(() => {
+    if (!userId) return;
+
+    const fetchInitialTracking = async () => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('tracking_enabled')
+        .eq('id', userId)
+        .maybeSingle();
+      
+      if (!error && data) {
+        setTrackingEnabled(data.tracking_enabled !== false);
+      }
+    };
+
+    fetchInitialTracking();
+
+    const profileSub = supabase
+      .channel(`profile-self-${userId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${userId}` },
+        (payload: any) => {
+          if (payload.new && payload.new.tracking_enabled !== undefined) {
+            setTrackingEnabled(payload.new.tracking_enabled !== false);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      profileSub.unsubscribe();
+    };
+  }, [userId]);
+
   // 2. Geolocation Watcher
   useEffect(() => {
-    if (!userId || !familyId) return;
+    if (!userId || !familyId || !trackingEnabled) {
+      // If tracking is disabled, clean up location
+      setMyLocation(null);
+      return;
+    }
 
+    let active = true;
     let watchId: string | null = null;
     
     const startTracking = async () => {
       try {
         const perm = await Geolocation.requestPermissions();
+        if (!active) return;
         if (perm.location !== 'granted') {
           setGpsError("GPS Denegado. Actívalo en los ajustes de tu teléfono.");
           return;
@@ -333,7 +417,7 @@ export default function ClientDashboard() {
         watchId = await Geolocation.watchPosition(
           { enableHighAccuracy: true, timeout: 10000 },
           (position) => {
-            if (position) {
+            if (position && active) {
               const coords: [number, number] = [position.coords.latitude, position.coords.longitude];
               setMyLocation(coords);
 
@@ -345,7 +429,7 @@ export default function ClientDashboard() {
                 longitude: position.coords.longitude,
                 updated_at: new Date().toISOString()
               }).then(({ error }) => {
-                if (error) console.error("Error upserting location:", error);
+                if (error && active) console.error("Error upserting location:", error);
               });
 
               // Record to 30-day history logs
@@ -355,22 +439,26 @@ export default function ClientDashboard() {
                 latitude: position.coords.latitude,
                 longitude: position.coords.longitude
               }).then(({ error }) => {
-                if (error) console.error("Error writing locations_history:", error);
+                if (error && active) console.error("Error writing locations_history:", error);
               });
             }
           }
         );
+        if (!active && watchId) {
+          Geolocation.clearWatch({ id: watchId });
+        }
       } catch (e) {
-        console.error('Error starting location watcher', e);
+        if (active) console.error('Error starting location watcher', e);
       }
     };
     
     startTracking();
     
     return () => {
+      active = false;
       if (watchId) Geolocation.clearWatch({ id: watchId });
     };
-  }, [userId, familyId]);
+  }, [userId, familyId, trackingEnabled]);
 
   // Reactive Map Centering
   useEffect(() => {
@@ -423,7 +511,7 @@ export default function ClientDashboard() {
     if (!familyId || !userId) return;
 
     // Send chat message directly to database
-    await supabase.from('messages').insert({
+    const { error } = await supabase.from('messages').insert({
       family_id: familyId,
       sender_id: userId,
       sender_name: userName,
@@ -431,6 +519,10 @@ export default function ClientDashboard() {
       content: msg.content,
       timestamp: msg.timestamp
     });
+    if (error) {
+      console.error("Error inserting message to Supabase:", error);
+      showToast("❌ Error al enviar mensaje");
+    }
   };
 
   const handleSendText = () => {
@@ -468,7 +560,10 @@ export default function ClientDashboard() {
     dispatchChatMessage(msg);
   };
 
-  const toggleRecording = async () => {
+  const toggleRecording = async (e?: React.MouseEvent | React.TouchEvent) => {
+    if (e && (e.type === 'touchstart' || e.type === 'touchend')) {
+      e.preventDefault();
+    }
     if (isRecording) {
       if (mediaRecorderRef.current) mediaRecorderRef.current.stop();
       setIsRecording(false);
@@ -521,21 +616,30 @@ export default function ClientDashboard() {
   };
 
   // SOS Gesture logic
-  const handleSOSPressStart = () => {
+  const handleSOSPressStart = (e?: React.MouseEvent | React.TouchEvent) => {
+    if (e && e.type === 'touchstart') {
+      e.preventDefault();
+    }
     if (sosTimerRef.current) clearTimeout(sosTimerRef.current);
     sosTimerRef.current = setTimeout(() => {
       setSOSActive(true);
     }, 3000);
   };
 
-  const handleSOSPressEnd = () => {
+  const handleSOSPressEnd = (e?: React.MouseEvent | React.TouchEvent) => {
+    if (e && e.type === 'touchend') {
+      e.preventDefault();
+    }
     if (sosTimerRef.current) {
       clearTimeout(sosTimerRef.current);
       sosTimerRef.current = null;
     }
   };
 
-  const startCancelSOS = () => {
+  const startCancelSOS = (e?: React.MouseEvent | React.TouchEvent) => {
+    if (e && e.type === 'touchstart') {
+      e.preventDefault();
+    }
     if (cancelTimerRef.current) clearTimeout(cancelTimerRef.current);
     cancelTimerRef.current = setTimeout(() => {
       setSOSActive(false);
@@ -544,7 +648,10 @@ export default function ClientDashboard() {
     }, 3000);
   };
 
-  const stopCancelSOS = () => {
+  const stopCancelSOS = (e?: React.MouseEvent | React.TouchEvent) => {
+    if (e && e.type === 'touchend') {
+      e.preventDefault();
+    }
     if (cancelTimerRef.current) {
       clearTimeout(cancelTimerRef.current);
       cancelTimerRef.current = null;
@@ -568,15 +675,178 @@ export default function ClientDashboard() {
     }, 2000);
   };
 
-  const confirmLogout = () => {
+  const confirmLogout = async () => {
     if (unlinkConfirmName.trim() === userName.trim()) {
       const doubleCheck = window.confirm("¿Estás seguro de desvincular este dispositivo de tu familia en la nube?");
       if (!doubleCheck) return;
       setIsUnlinkModalOpen(false);
-      logout();
-      navigate('/');
+      const { error } = await unlinkFamily();
+      if (error) {
+        alert(error);
+      }
     }
   };
+
+  const toggleTracking = async () => {
+    const newStatus = !trackingEnabled;
+    setTrackingEnabled(newStatus);
+    if (userId) {
+      await supabase.from('profiles').update({ tracking_enabled: newStatus }).eq('id', userId);
+    }
+  };
+
+  const handleScan = async (result: any) => {
+    if (result && result.length > 0) {
+      const text = result[0].rawValue;
+      if (text) {
+        setScanError(false);
+        setIsLoading(true);
+        const { error } = await joinFamily(text);
+        setIsLoading(false);
+        if (error) {
+          setScanError(true);
+          setTimeout(() => setScanError(false), 3000);
+        }
+      }
+    }
+  };
+
+  const handleScanError = (error: unknown) => {
+    console.error('Scanner error:', error);
+    setCameraError('No se pudo acceder a la cámara. Revisa los permisos e intenta de nuevo.');
+    setTimeout(() => setCameraError(''), 5000);
+  };
+
+  const handleManualLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualCodeInput.trim()) {
+      setFormError('Por favor ingrese el código de vinculación.');
+      return;
+    }
+    setFormError('');
+    setIsLoading(true);
+    const { error } = await joinFamily(manualCodeInput.trim());
+    setIsLoading(false);
+    if (error) {
+      setFormError(error);
+    }
+  };
+
+  // Cleanup active timeouts/intervals on unmount to prevent state updates on unmounted components
+  useEffect(() => {
+    return () => {
+      if (sosTimerRef.current) clearTimeout(sosTimerRef.current);
+      if (cancelTimerRef.current) clearTimeout(cancelTimerRef.current);
+      if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
+    };
+  }, []);
+
+  // Auto scroll chat to bottom when messages list updates or chat is opened
+  useEffect(() => {
+    if (isChatOpen && chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [messages, isChatOpen]);
+
+  if (!familyId) {
+    return (
+      <div className="onboarding-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: 'linear-gradient(135deg, #0f0c20, #15102a, #06020f)', color: 'white', padding: '20px' }}>
+        {formError && (
+          <div style={{
+            position: 'absolute', top: '16px', left: '16px', right: '16px',
+            background: 'rgba(220, 38, 38, 0.95)', border: '1px solid #ef4444',
+            padding: '12px 16px', borderRadius: '16px', color: 'white', zIndex: 9999,
+            fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px',
+            boxShadow: '0 8px 32px rgba(239, 68, 68, 0.4)', maxWidth: '380px', margin: '0 auto'
+          }}>
+            <ShieldAlert size={18} style={{ flexShrink: 0 }} />
+            <span style={{ flex: 1, textAlign: 'left' }}>{formError}</span>
+            <button type="button" onClick={() => setFormError('')} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontWeight: 'bold', fontSize: '18px' }}>×</button>
+          </div>
+        )}
+
+        <div className="glass-panel" style={{ width: '100%', maxWidth: '400px', padding: '24px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '20px', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '24px', backdropFilter: 'blur(20px)', boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.37)' }}>
+          
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+            <Radar size={24} color="#ec4899" className="animate-pulse" />
+            <h1 style={{ fontSize: '22px', fontWeight: 'bold', margin: 0 }}>Radar Familiar</h1>
+          </div>
+
+          <div>
+            <h3 style={{ fontSize: '18px', margin: '10px 0 4px 0' }}>Vincular con Tutor / Padre</h3>
+            <p style={{ fontSize: '13px', opacity: 0.7, margin: 0, lineHeight: 1.4 }}>
+              Este dispositivo está registrado como Rastreable (Hijo/a). Escanea el código QR del Tutor o ingresa el código manual para conectarte.
+            </p>
+          </div>
+
+          {/* QR Scanner Activation */}
+          {!isCameraActive ? (
+            <button 
+              type="button" 
+              onClick={() => { setCameraError(''); setIsCameraActive(true); }} 
+              className="glass-btn primary" 
+              style={{ background: 'linear-gradient(90deg, #ec4899 0%, #8b5cf6 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '14px', fontSize: '14px', border: 'none', borderRadius: '12px', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}
+            >
+              <Camera size={18} /> Activar Cámara y Escanear QR
+            </button>
+          ) : cameraError ? (
+            <div className="error-card" style={{ width: '100%', padding: '14px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '12px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+              <Camera size={24} color="#fca5a5" style={{ margin: '0 auto' }} />
+              <p style={{ color: '#fca5a5', fontSize: '12px', margin: '8px 0' }}>{cameraError}</p>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button type="button" className="glass-btn secondary" style={{ fontSize: '12px', padding: '8px', flex: 1 }} onClick={() => { setCameraError(''); }}>Reintentar</button>
+                <button type="button" className="glass-btn secondary" style={{ fontSize: '12px', padding: '8px', flex: 1 }} onClick={() => setIsCameraActive(false)}>Cerrar</button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: '10px' }}>
+              <div style={{ width: '100%', maxWidth: '200px', borderRadius: '16px', overflow: 'hidden', aspectRatio: '1/1' }}>
+                <Scanner onScan={handleScan} onError={handleScanError} />
+              </div>
+              <button type="button" onClick={() => setIsCameraActive(false)} className="glass-btn secondary" style={{ padding: '6px 12px', fontSize: '12px', width: 'auto' }}>
+                Apagar Cámara
+              </button>
+            </div>
+          )}
+
+          {scanError && (
+            <div style={{ background: 'rgba(252,165,165,0.1)', padding: '8px 12px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <ShieldAlert size={14} color="#fca5a5" />
+              <span style={{ color: '#fca5a5', fontSize: '12px' }}>Código QR inválido. Intenta de nuevo.</span>
+            </div>
+          )}
+
+          {/* Manual Link Input */}
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <p style={{ fontSize: '12px', opacity: 0.7, margin: 0, textAlign: 'left' }}>O ingresa el código manual:</p>
+            <form onSubmit={handleManualLink} style={{ display: 'flex', gap: '8px' }}>
+              <input 
+                type="text" 
+                placeholder="Pegar código (UUID)" 
+                value={manualCodeInput}
+                onChange={(e) => setManualCodeInput(e.target.value)}
+                className="glass-input" 
+                style={{ padding: '10px 12px', fontSize: '13px', margin: 0, flex: 1 }}
+              />
+              <button type="submit" className="glass-btn primary" style={{ width: 'auto', padding: '10px 16px', fontSize: '13px', margin: 0 }} disabled={isLoading}>
+                {isLoading ? 'Vinculando...' : 'Vincular'}
+              </button>
+            </form>
+          </div>
+
+          <button type="button" onClick={() => logout()} className="glass-btn secondary" style={{ opacity: 0.8, padding: '10px', fontSize: '13px' }}>
+            Cerrar Sesión
+          </button>
+        </div>
+
+        {/* Brand logo at the bottom */}
+        <div style={{ marginTop: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
+          <img src={developerLogo} alt="AG Creation" style={{ width: '190px', opacity: 1.0, filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.3))' }} />
+          <p style={{ fontSize: '11px', opacity: 0.7, color: '#a78bfa', fontWeight: '500' }}>🛡️ Seguridad en la Nube con Supabase</p>
+        </div>
+      </div>
+    );
+  }
 
   if (isSOSActive) {
     return (
@@ -594,6 +864,12 @@ export default function ClientDashboard() {
 
   return (
     <div className="dashboard-container" style={{ position: 'relative', overflow: 'hidden' }}>
+      {toastMessage && (
+        <div style={{ position: 'absolute', top: 75, left: '50%', transform: 'translateX(-50%)', background: 'rgba(30, 27, 75, 0.95)', border: '1px solid rgba(255, 255, 255, 0.1)', color: 'white', padding: '12px 24px', borderRadius: '12px', zIndex: 9999, fontSize: '13px', boxShadow: '0 4px 20px rgba(0,0,0,0.3)', pointerEvents: 'none' }}>
+          {toastMessage}
+        </div>
+      )}
+
       {gpsError && (
         <div style={{ position: 'absolute', top: 60, left: 0, right: 0, background: '#ef4444', color: 'white', padding: '12px', textAlign: 'center', zIndex: 9999, fontWeight: 'bold' }}>
           {gpsError}
@@ -605,7 +881,16 @@ export default function ClientDashboard() {
         <TileLayer url={mapTheme === 'dark' ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"} />
         
         {myLocation && (
-          <Marker position={myLocation} icon={myIconRef.current}>
+          <Marker 
+            position={myLocation} 
+            icon={myIcon}
+            eventHandlers={{
+              click: () => {
+                setTrackingTargetId('me');
+                setMapCenterTarget(myLocation);
+              }
+            }}
+          >
             <Popup>Tú (Rastreable)</Popup>
           </Marker>
         )}
@@ -613,7 +898,17 @@ export default function ClientDashboard() {
         {Object.entries(familyMembers).map(([id, member]) => {
           if (member.lat === 0 && member.lng === 0) return null;
           return (
-            <Marker key={id} position={[member.lat, member.lng]} icon={getAvatarIcon(id, member.avatar, member.isOnline, member.role === 'monitor')}>
+            <Marker 
+              key={id} 
+              position={[member.lat, member.lng]} 
+              icon={getAvatarIcon(id, member.avatar, member.isOnline, member.role === 'monitor')}
+              eventHandlers={{
+                click: () => {
+                  setTrackingTargetId(id);
+                  setMapCenterTarget([member.lat, member.lng]);
+                }
+              }}
+            >
               <Popup>{member.name} ({member.role === 'monitor' ? 'Tutor' : 'Hijo'})</Popup>
             </Marker>
           );
@@ -641,7 +936,7 @@ export default function ClientDashboard() {
           {avatarBase64 ? (
             <img src={avatarBase64} alt="Yo" />
           ) : (
-            <div className="map-avatar-placeholder">{userName.charAt(0).toUpperCase()}</div>
+            <div className="map-avatar-placeholder">{(userName || '?').charAt(0).toUpperCase()}</div>
           )}
         </button>
 
@@ -660,7 +955,7 @@ export default function ClientDashboard() {
             {member.avatar ? (
               <img src={member.avatar} alt={member.name} style={{ opacity: member.isOnline ? 1 : 0.5 }} />
             ) : (
-              <div className="map-avatar-placeholder" style={{ opacity: member.isOnline ? 1 : 0.5 }}>{member.name.charAt(0).toUpperCase()}</div>
+              <div className="map-avatar-placeholder" style={{ opacity: member.isOnline ? 1 : 0.5 }}>{(member.name || '?').charAt(0).toUpperCase()}</div>
             )}
           </button>
         ))}
@@ -682,6 +977,36 @@ export default function ClientDashboard() {
         style={{ position: 'absolute', top: '16px', left: '16px', zIndex: 1000 }}
       >
         <Menu size={24} />
+      </button>
+
+      {/* Botón flotante de control de GPS (Ahorro de batería) */}
+      <button 
+        onClick={toggleTracking}
+        style={{ 
+          position: 'absolute', 
+          top: '16px', 
+          right: '16px', 
+          zIndex: 1000,
+          background: trackingEnabled ? 'rgba(74, 222, 128, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+          border: trackingEnabled ? '1px solid rgba(74, 222, 128, 0.4)' : '1px solid rgba(239, 68, 68, 0.4)',
+          color: trackingEnabled ? '#4ade80' : '#fca5a5',
+          borderRadius: '24px',
+          padding: '8px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          cursor: 'pointer',
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
+          fontWeight: 'bold',
+          fontSize: '12px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
+          transition: 'all 0.3s ease'
+        }}
+        title={trackingEnabled ? "Pausar rastreo (Ahorrar Batería)" : "Activar rastreo GPS"}
+      >
+        {trackingEnabled ? <Zap size={14} className="animate-pulse" /> : <Battery size={14} />}
+        <span>{trackingEnabled ? 'Rastreo: ACTIVO' : 'Ahorro Batería: ON'}</span>
       </button>
 
       {/* Panel táctico de SOS (Pulsación de 3 segundos) */}
@@ -719,7 +1044,7 @@ export default function ClientDashboard() {
             <button className="icon-btn" onClick={() => setIsMenuOpen(false)} style={{ marginRight: '-8px' }}><X size={24} /></button>
           </div>
           <div style={{ paddingLeft: '4px', width: '100%' }}>
-            <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '150px' }} />
+            <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '190px' }} />
           </div>
         </div>
 
@@ -737,7 +1062,7 @@ export default function ClientDashboard() {
                   {member.avatar ? (
                     <img src={member.avatar} alt={member.name} style={{ width: '32px', height: '32px', borderRadius: '50%', objectFit: 'cover' }} />
                   ) : (
-                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#8b5cf6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{member.name.charAt(0).toUpperCase()}</div>
+                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#8b5cf6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{(member.name || '?').charAt(0).toUpperCase()}</div>
                   )}
                   <div style={{ flex: 1, textAlign: 'left' }}>
                     <p style={{ fontSize: '14px', fontWeight: 'bold', margin: 0 }}>{member.name}</p>
@@ -756,7 +1081,7 @@ export default function ClientDashboard() {
             {avatarBase64 ? (
               <img src={avatarBase64} alt={userName} style={{ width: '40px', height: '40px', borderRadius: '50%', objectFit: 'cover', border: '2px solid #4ade80' }} />
             ) : (
-              <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#4ade80', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '16px' }}>{userName.charAt(0).toUpperCase()}</div>
+              <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#4ade80', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '16px' }}>{(userName || '?').charAt(0).toUpperCase()}</div>
             )}
             <div style={{ flex: 1, textAlign: 'left' }}>
               <p style={{ fontSize: '14px', fontWeight: 'bold', margin: 0 }}>{userName}</p>

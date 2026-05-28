@@ -57,6 +57,8 @@ interface AppState {
   resetPassword: (email: string) => Promise<{ error: string | null }>;
   joinFamily: (familyCode: string) => Promise<{ error: string | null }>;
   loadSession: () => Promise<void>;
+  unlinkFamily: () => Promise<{ error: string | null }>;
+  updateTrackingStatus: (targetUserId: string, enabled: boolean) => Promise<{ error: string | null }>;
 }
 
 
@@ -255,15 +257,39 @@ export const useStore = create<AppState>()(
             return { error: null };
           }
 
+          // Self-healing: If user is a monitor but has no family_id, create it now
+          let activeFamilyId = profile.family_id;
+          if (profile.role === 'monitor' && !activeFamilyId) {
+            const { data: family, error: famErr } = await supabase
+              .from('families')
+              .insert({})
+              .select()
+              .single();
+            
+            if (!famErr && family) {
+              activeFamilyId = family.id;
+              await supabase
+                .from('profiles')
+                .update({ family_id: activeFamilyId })
+                .eq('id', u.id);
+
+              await supabase.from('alerts').insert({
+                family_id: activeFamilyId,
+                is_sos_active: false,
+                siren_active: false
+              });
+            }
+          }
+
           set({
             userId: u.id,
             userEmail: u.email || null,
             userName: profile.name,
             avatarBase64: profile.avatar,
             role: profile.role,
-            familyCode: profile.family_id,
-            familyId: profile.family_id,
-            masterServerId: profile.family_id,
+            familyCode: activeFamilyId,
+            familyId: activeFamilyId,
+            masterServerId: activeFamilyId,
           });
         }
         return { error: null };
@@ -273,8 +299,14 @@ export const useStore = create<AppState>()(
         let signUpData;
         let signUpError;
         
-        // 1. Attempt to sign up the user
-        const res = await supabase.auth.signUp({ email, password });
+        // 1. Attempt to sign up the user, redirecting back to the current web path (handles hosting / subfolders correctly)
+        const res = await supabase.auth.signUp({ 
+          email, 
+          password,
+          options: {
+            emailRedirectTo: window.location.origin + window.location.pathname
+          }
+        });
         signUpData = res.data;
         signUpError = res.error;
 
@@ -309,21 +341,45 @@ export const useStore = create<AppState>()(
             .maybeSingle();
 
           if (existingProfile) {
-            // Profile already exists! Just load it
+            // Profile already exists! Load it and self-heal if it's a monitor without family_id
+            let activeFamilyId = existingProfile.family_id;
+            if (existingProfile.role === 'monitor' && !activeFamilyId) {
+              const { data: family, error: famErr } = await supabase
+                .from('families')
+                .insert({})
+                .select()
+                .single();
+              
+              if (!famErr && family) {
+                activeFamilyId = family.id;
+                await supabase
+                  .from('profiles')
+                  .update({ family_id: activeFamilyId })
+                  .eq('id', u.id);
+
+                await supabase.from('alerts').insert({
+                  family_id: activeFamilyId,
+                  is_sos_active: false,
+                  siren_active: false
+                });
+              }
+            }
+
             set({
               userId: u.id,
               userEmail: u.email || null,
               userName: existingProfile.name,
               avatarBase64: existingProfile.avatar,
               role: existingProfile.role,
-              familyCode: existingProfile.family_id,
-              familyId: existingProfile.family_id,
-              masterServerId: existingProfile.family_id,
+              familyCode: activeFamilyId,
+              familyId: activeFamilyId,
+              masterServerId: activeFamilyId,
             });
             return { error: null };
           }
 
           // Profile does not exist, create it!
+          // Note: If email confirmation is enabled, these inserts might fail due to RLS if the session is not yet active.
           if (role === 'monitor') {
             const { data: family, error: famErr } = await supabase
               .from('families')
@@ -429,6 +485,36 @@ export const useStore = create<AppState>()(
           masterServerId: familyCode
         });
 
+        return { error: null };
+      },
+
+      unlinkFamily: async () => {
+        const userId = get().userId;
+        if (!userId) return { error: "No hay sesión iniciada." };
+
+        const { error: profErr } = await supabase
+          .from('profiles')
+          .update({ family_id: null })
+          .eq('id', userId);
+
+        if (profErr) return { error: "No se pudo desvincular el dispositivo: " + profErr.message };
+
+        set({
+          familyCode: null,
+          familyId: null,
+          masterServerId: null,
+          messages: []
+        });
+
+        return { error: null };
+      },
+
+      updateTrackingStatus: async (targetUserId: string, enabled: boolean) => {
+        const { error } = await supabase
+          .from('profiles')
+          .update({ tracking_enabled: enabled })
+          .eq('id', targetUserId);
+        if (error) return { error: error.message };
         return { error: null };
       }
     }),
