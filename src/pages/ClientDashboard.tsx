@@ -406,7 +406,12 @@ export default function ClientDashboard() {
     
     const startTracking = async () => {
       try {
-        const perm = await Geolocation.requestPermissions();
+        let perm = { location: 'granted' };
+        try {
+          perm = await Geolocation.requestPermissions();
+        } catch (e) {
+          console.warn("Implicit geolocation permissions on web platform:", e);
+        }
         if (!active) return;
         if (perm.location !== 'granted') {
           setGpsError("GPS Denegado. Actívalo en los ajustes de tu teléfono.");
