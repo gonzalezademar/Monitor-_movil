@@ -560,21 +560,15 @@ body {
   transform: scale(1.03);
 }
 
-/* Marca de agua flotante en las esquinas de los Dashboards */
 .floating-brand-logo {
   position: absolute;
-  bottom: 85px;
+  bottom: 16px;
   right: 16px;
-  width: 165px;
-  z-index: 1000;
-  opacity: 0.95;
-  pointer-events: auto;
-  cursor: pointer;
+  width: 140px;
+  z-index: 999;
+  opacity: 0.85;
+  pointer-events: none;
   transition: opacity 0.2s, transform 0.2s;
-}
-.floating-brand-logo:hover {
-  opacity: 1;
-  transform: scale(1.05);
 }
 
 /* Welcome Landing Page styles */
