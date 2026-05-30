@@ -536,7 +536,7 @@ export const useStore = create<AppState>()(
   )
 );
 
-export const playTonalSound = (type: 'CHAT_RECEIVE' | 'P2P_HANDSHAKE' | 'P2P_LOST' | 'GEOFENCE_BREACH' | 'PTT_START') => {
+export const playTonalSound = (type: 'CHAT_RECEIVE' | 'P2P_HANDSHAKE' | 'P2P_LOST' | 'GEOFENCE_BREACH' | 'PTT_START' | 'ACCOMPANY_START') => {
   try {
     if (!(window as any).globalAudioCtx) {
       (window as any).globalAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -611,6 +611,18 @@ export const playTonalSound = (type: 'CHAT_RECEIVE' | 'P2P_HANDSHAKE' | 'P2P_LOS
         gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
         osc.start(now);
         osc.stop(now + 0.05);
+        break;
+
+      case 'ACCOMPANY_START':
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(0.1, now);
+        osc.frequency.setValueAtTime(523, now);
+        osc.frequency.setValueAtTime(659, now + 0.08);
+        osc.frequency.setValueAtTime(784, now + 0.16);
+        osc.frequency.setValueAtTime(1046, now + 0.24);
+        gain.gain.setValueAtTime(0, now + 0.35);
+        osc.start(now);
+        osc.stop(now + 0.35);
         break;
     }
   } catch (e) {

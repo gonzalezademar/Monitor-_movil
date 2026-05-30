@@ -557,11 +557,18 @@ export default function MonitorDashboard() {
       })
       .on('broadcast', { event: 'acompaniame-report' }, (payload: any) => {
         if (payload.payload) {
-          const { senderId, expiresAt } = payload.payload;
-          setAccompaniedClients(prev => ({
-            ...prev,
-            [senderId]: expiresAt
-          }));
+          const { senderId, expiresAt, senderName } = payload.payload;
+          setAccompaniedClients(prev => {
+            if (!prev[senderId] || prev[senderId] <= Date.now()) {
+              const name = senderName || clients[senderId]?.name || 'Hijo';
+              showToast(`⏱️ Acompañamiento iniciado por ${name}`);
+              playTonalSound('ACCOMPANY_START');
+            }
+            return {
+              ...prev,
+              [senderId]: expiresAt
+            };
+          });
         }
       })
       .on('broadcast', { event: 'acompaniame-stop' }, (payload: any) => {
@@ -938,6 +945,13 @@ export default function MonitorDashboard() {
           <button onClick={stopSiren} className="glass-btn secondary" style={{ color: 'white', borderColor: 'white', width: '100%' }}>
             Silenciar Alerta Local
           </button>
+        </div>
+      )}
+
+      {Object.entries(accompaniedClients).some(([_, expires]) => expires > Date.now()) && (
+        <div style={{ position: 'absolute', top: alarmActive.active ? '180px' : '16px', left: '50%', transform: 'translateX(-50%)', zIndex: 9998, background: 'rgba(236,72,153,0.95)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '12px 24px', borderRadius: '16px', display: 'flex', alignItems: 'center', gap: '10px', boxShadow: '0 4px 20px rgba(236, 72, 153, 0.4)', fontSize: '13px', fontWeight: 'bold' }}>
+          <Clock size={18} className="animate-pulse" />
+          <span>Acompañamiento Activo: {Object.entries(accompaniedClients).filter(([_, expires]) => expires > Date.now()).map(([childId]) => clients[childId]?.name || 'Hijo').join(', ')}</span>
         </div>
       )}
 

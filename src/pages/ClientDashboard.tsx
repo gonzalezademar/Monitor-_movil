@@ -299,7 +299,7 @@ export default function ClientDashboard() {
       supabase.channel(`broadcast-${familyId}`).send({
         type: 'broadcast',
         event: 'acompaniame-report',
-        payload: { senderId: userId, expiresAt: expires }
+        payload: { senderId: userId, expiresAt: expires, senderName: userName }
       });
       showToast("Modo Acompáñame ACTIVADO por 15 min.");
       playTonalSound('CHAT_RECEIVE');
@@ -546,7 +546,7 @@ export default function ClientDashboard() {
           broadcastChannel.send({
             type: 'broadcast',
             event: 'acompaniame-report',
-            payload: { senderId: userId, expiresAt: expires }
+            payload: { senderId: userId, expiresAt: expires, senderName: userName }
           });
         }
       })
