@@ -125,6 +125,9 @@ export default function MonitorDashboard() {
   // History path coordinates
   const [historyPath, setHistoryPath] = useState<[number, number][]>([]);
   const [historyUser, setHistoryUser] = useState<string | null>(null);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [selectedChildForHistory, setSelectedChildForHistory] = useState<{ id: string; name: string } | null>(null);
+  const [customHistoryDate, setCustomHistoryDate] = useState('');
 
   const markerIconCache = useRef<Record<string, L.DivIcon>>({});
   const getAvatarIcon = (id: string, avatar: string | null, isOnline: boolean, isMonitor: boolean) => {
@@ -552,16 +555,51 @@ export default function MonitorDashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch 30-day location history
-  const showHistoricalRoute = async (childId: string, childName: string) => {
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  // Fetch filtered location history
+  const showHistoricalRoute = async (
+    childId: string, 
+    childName: string, 
+    rangeType: 'today' | 'yesterday' | 'custom' | 'all',
+    customDate?: string
+  ) => {
+    let startDateTime: Date;
+    let endDateTime: Date = new Date();
+
+    if (rangeType === 'today') {
+      startDateTime = new Date();
+      startDateTime.setHours(0, 0, 0, 0);
+    } else if (rangeType === 'yesterday') {
+      startDateTime = new Date();
+      startDateTime.setDate(startDateTime.getDate() - 1);
+      startDateTime.setHours(0, 0, 0, 0);
+      
+      endDateTime = new Date();
+      endDateTime.setDate(endDateTime.getDate() - 1);
+      endDateTime.setHours(23, 59, 59, 999);
+    } else if (rangeType === 'custom' && customDate) {
+      const parts = customDate.split('-');
+      if (parts.length === 3) {
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        const day = parseInt(parts[2], 10);
+        startDateTime = new Date(year, month, day, 0, 0, 0, 0);
+        endDateTime = new Date(year, month, day, 23, 59, 59, 999);
+      } else {
+        showToast("Fecha no válida.");
+        return;
+      }
+    } else {
+      // 'all' (30 days)
+      startDateTime = new Date();
+      startDateTime.setDate(startDateTime.getDate() - 30);
+    }
 
     const { data, error } = await supabase
       .from('locations_history')
       .select('*')
       .eq('user_id', childId)
-      .gte('created_at', thirtyDaysAgo.toISOString())
+      .gte('created_at', startDateTime.toISOString())
+      .lte('created_at', endDateTime.toISOString())
       .order('created_at', { ascending: true });
 
     if (error) {
@@ -570,7 +608,11 @@ export default function MonitorDashboard() {
     }
 
     if (!data || data.length === 0) {
-      showToast(`No hay historial de ubicación para ${childName}`);
+      let rangeLabel = "el período seleccionado";
+      if (rangeType === 'today') rangeLabel = "hoy";
+      else if (rangeType === 'yesterday') rangeLabel = "ayer";
+      else if (rangeType === 'custom' && customDate) rangeLabel = customDate;
+      showToast(`No hay historial de ubicación para ${childName} (${rangeLabel})`);
       setHistoryPath([]);
       setHistoryUser(null);
       return;
@@ -579,7 +621,13 @@ export default function MonitorDashboard() {
     const path = data.map((h: any) => [h.latitude, h.longitude] as [number, number]);
     setHistoryPath(path);
     setHistoryUser(childName);
-    showToast(`Mostrando ruta histórica de ${childName} (Últimos 30 días)`);
+
+    let rangeLabel = "últimos 30 días";
+    if (rangeType === 'today') rangeLabel = "hoy";
+    else if (rangeType === 'yesterday') rangeLabel = "ayer";
+    else if (rangeType === 'custom' && customDate) rangeLabel = customDate;
+    
+    showToast(`Mostrando ruta de ${childName} (${rangeLabel})`);
     
     // Auto-center on the beginning of the path
     setMapCenterTarget(path[0]);
@@ -942,11 +990,14 @@ export default function MonitorDashboard() {
                       {c.tracking_enabled !== false ? 'GPS: Activo' : 'GPS: Suspendido'}
                     </button>
                     <button 
-                      onClick={() => showHistoricalRoute(id, c.name)}
+                      onClick={() => {
+                        setSelectedChildForHistory({ id, name: c.name });
+                        setIsHistoryModalOpen(true);
+                      }}
                       className="glass-btn secondary"
                       style={{ fontSize: '11px', padding: '6px 10px', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
                     >
-                      <Clock size={12} /> Ver Ruta (30d)
+                      <Clock size={12} /> Ver Ruta
                     </button>
                   </div>
                 </div>
@@ -1080,6 +1131,87 @@ export default function MonitorDashboard() {
                 Cancelar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* SELECTOR DE RANGO HISTÓRICO */}
+      {isHistoryModalOpen && selectedChildForHistory && (
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
+          <div className="glass-panel" style={{ width: '100%', maxWidth: '340px', padding: '24px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <h3 style={{ fontSize: '18px', color: '#ec4899', margin: 0 }}>Ruta de {selectedChildForHistory.name}</h3>
+            <p style={{ fontSize: '13px', opacity: 0.8, margin: 0 }}>
+              Selecciona el período o fecha que deseas ver en el mapa:
+            </p>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <button 
+                onClick={() => {
+                  showHistoricalRoute(selectedChildForHistory.id, selectedChildForHistory.name, 'today');
+                  setIsHistoryModalOpen(false);
+                }}
+                className="glass-btn primary"
+                style={{ background: 'rgba(236, 72, 153, 0.1)', borderColor: '#ec4899', color: 'white' }}
+              >
+                📅 Hoy (Últimas horas)
+              </button>
+              
+              <button 
+                onClick={() => {
+                  showHistoricalRoute(selectedChildForHistory.id, selectedChildForHistory.name, 'yesterday');
+                  setIsHistoryModalOpen(false);
+                }}
+                className="glass-btn primary"
+                style={{ background: 'rgba(139, 92, 246, 0.1)', borderColor: '#8b5cf6', color: 'white' }}
+              >
+                📅 Ayer
+              </button>
+              
+              <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '10px', marginTop: '4px' }}>
+                <p style={{ fontSize: '12px', opacity: 0.6, margin: '0 0 6px 0', textAlign: 'left' }}>Fecha específica:</p>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input 
+                    type="date"
+                    value={customHistoryDate}
+                    max={new Date().toISOString().split('T')[0]}
+                    onChange={(e) => setCustomHistoryDate(e.target.value)}
+                    className="glass-input"
+                    style={{ margin: 0, flex: 1, padding: '8px', fontSize: '13px', color: 'white', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }}
+                  />
+                  <button
+                    onClick={() => {
+                      if (!customHistoryDate) return;
+                      showHistoricalRoute(selectedChildForHistory.id, selectedChildForHistory.name, 'custom', customHistoryDate);
+                      setIsHistoryModalOpen(false);
+                    }}
+                    disabled={!customHistoryDate}
+                    className="glass-btn primary"
+                    style={{ padding: '8px 12px', fontSize: '13px', opacity: customHistoryDate ? 1 : 0.5 }}
+                  >
+                    Ver
+                  </button>
+                </div>
+              </div>
+
+              <button 
+                onClick={() => {
+                  showHistoricalRoute(selectedChildForHistory.id, selectedChildForHistory.name, 'all');
+                  setIsHistoryModalOpen(false);
+                }}
+                className="glass-btn secondary"
+                style={{ fontSize: '12px', padding: '8px', marginTop: '6px' }}
+              >
+                🔄 Ver todo el historial (30 días)
+              </button>
+            </div>
+
+            <button 
+              onClick={() => { setIsHistoryModalOpen(false); setSelectedChildForHistory(null); setCustomHistoryDate(''); }}
+              className="glass-btn secondary"
+              style={{ width: '100%', marginTop: '4px' }}
+            >
+              Cancelar
+            </button>
           </div>
         </div>
       )}
