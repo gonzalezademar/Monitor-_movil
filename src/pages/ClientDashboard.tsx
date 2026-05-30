@@ -1,9 +1,9 @@
 import { useStore, playTonalSound, type ChatMessage } from '../store/useStore';
 import { useRef, useEffect, useState, useMemo } from 'react';
 import { Geolocation } from '@capacitor/geolocation';
-import { MapContainer, TileLayer, Marker, useMap, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, useMap, Popup, Circle } from 'react-leaflet';
 import L from 'leaflet';
-import { ShieldAlert, Bell, MessageSquare, LogOut, Mic, Send, X, Camera, Menu, Smartphone, Sun, Moon, Image, Radar, Zap, Battery } from 'lucide-react';
+import { ShieldAlert, Bell, MessageSquare, LogOut, Mic, Send, X, Camera, Menu, Smartphone, Sun, Moon, Image, Radar, Zap, Battery, Check, Clock } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import { supabase } from '../supabaseClient';
 import { Scanner } from '@yudiel/react-qr-scanner';
@@ -139,18 +139,39 @@ export default function ClientDashboard() {
     iconAnchor: [18, 18] 
   }), [avatarBase64]);
 
+  // Walkie-Talkie & Acompáñame States
+  const [isWtRecording, setIsWtRecording] = useState(false);
+  const [isWtPlaying, setIsWtPlaying] = useState(false);
+  const [wtSender, setWtSender] = useState<string | null>(null);
+  const wtMediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const wtAudioChunksRef = useRef<Blob[]>([]);
+  const wtTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Acompáñame States
+  const [accompaniedExpiresAt, setAccompaniedExpiresAt] = useState<number | null>(null);
+  const [accompaniedTimeLeft, setAccompaniedTimeLeft] = useState<string>('');
+  const accompaniedExpiresAtRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    accompaniedExpiresAtRef.current = accompaniedExpiresAt;
+  }, [accompaniedExpiresAt]);
+
   const markerIconCache = useRef<Record<string, L.DivIcon>>({});
   const [gpsError, setGpsError] = useState<string | null>(null);
 
-  const getAvatarIcon = (id: string, avatar: string | null, isOnline: boolean, isMonitor: boolean) => {
-    const key = `${id}-${avatar || 'noavatar'}-${isOnline ? 'on' : 'off'}`;
+  const getAvatarIcon = (id: string, avatar: string | null, isOnline: boolean, isMonitor: boolean, isAccompanied?: boolean) => {
+    const key = `${id}-${avatar || 'noavatar'}-${isOnline ? 'on' : 'off'}-${isAccompanied ? 'acc' : 'noacc'}`;
     if (!markerIconCache.current[key]) {
-      const borderColor = isMonitor ? '#8b5cf6' : '#ec4899';
-      const shadowColor = isMonitor ? 'rgba(139,92,246,0.4)' : 'rgba(236,72,153,0.4)';
+      let borderColor = isMonitor ? '#8b5cf6' : '#ec4899';
+      let shadowColor = isMonitor ? 'rgba(139,92,246,0.4)' : 'rgba(236,72,153,0.4)';
+      if (isAccompanied) {
+        borderColor = '#ec4899';
+        shadowColor = 'rgba(236,72,153,0.8)';
+      }
       const opacity = isOnline ? '1' : '0.55';
 
       markerIconCache.current[key] = L.divIcon({
-        className: `custom-member-marker ${isOnline ? 'online' : 'offline'}`,
+        className: `custom-member-marker ${isOnline ? 'online' : 'offline'} ${isAccompanied ? 'accompanied-glow' : ''}`,
         html: avatar 
           ? `<div style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid ${borderColor};box-shadow:0 0 10px ${shadowColor};opacity:${opacity};"><img src="${avatar}" style="width:100%;height:100%;object-fit:cover;" /></div>`
           : `<div style="width:24px;height:24px;background:${borderColor};border-radius:50%;border:2px solid white;opacity:${opacity};"></div>`,
@@ -160,6 +181,160 @@ export default function ClientDashboard() {
     }
     return markerIconCache.current[key];
   };
+
+  const playWalkieTalkie = (base64Audio: string, senderName: string) => {
+    try {
+      playTonalSound('PTT_START');
+      setWtSender(senderName);
+      setIsWtPlaying(true);
+      const audioUrl = `data:audio/wav;base64,${base64Audio}`;
+      const audio = new Audio(audioUrl);
+      audio.play().then(() => {
+        audio.onended = () => {
+          setIsWtPlaying(false);
+          setWtSender(null);
+        };
+      }).catch(err => {
+        console.error("Audio playback error:", err);
+        setIsWtPlaying(false);
+        setWtSender(null);
+      });
+    } catch (e) {
+      console.error("WT decoding error:", e);
+      setIsWtPlaying(false);
+      setWtSender(null);
+    }
+  };
+
+  const startWtRecording = async (e?: React.MouseEvent | React.TouchEvent) => {
+    if (e) {
+      if (e.type === 'touchstart' || e.type === 'touchend') e.preventDefault();
+    }
+    if (isWtRecording) return;
+    try {
+      playTonalSound('PTT_START');
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      wtAudioChunksRef.current = [];
+      const mediaRecorder = new MediaRecorder(stream);
+      wtMediaRecorderRef.current = mediaRecorder;
+      
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) wtAudioChunksRef.current.push(event.data);
+      };
+      
+      mediaRecorder.onstop = () => {
+        stream.getTracks().forEach(track => track.stop());
+        const audioBlob = new Blob(wtAudioChunksRef.current, { type: 'audio/wav' });
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64 = reader.result as string;
+          const cleanBase64 = base64.split(',')[1];
+          
+          supabase.channel(`broadcast-${familyId}`).send({
+            type: 'broadcast',
+            event: 'walkie-talkie',
+            payload: {
+              audio: cleanBase64,
+              senderName: userName,
+              senderId: userId
+            }
+          });
+          showToast("🎙️ Walkie-Talkie enviado!");
+        };
+        reader.readAsDataURL(audioBlob);
+      };
+      
+      mediaRecorder.start();
+      setIsWtRecording(true);
+      
+      wtTimeoutRef.current = setTimeout(() => {
+        stopWtRecording();
+      }, 7000);
+    } catch (err) {
+      console.error("Error starting WT recording:", err);
+    }
+  };
+
+  const stopWtRecording = (e?: React.MouseEvent | React.TouchEvent) => {
+    if (e) {
+      if (e.type === 'touchstart' || e.type === 'touchend') e.preventDefault();
+    }
+    if (wtTimeoutRef.current) {
+      clearTimeout(wtTimeoutRef.current);
+      wtTimeoutRef.current = null;
+    }
+    if (wtMediaRecorderRef.current && wtMediaRecorderRef.current.state !== 'inactive') {
+      wtMediaRecorderRef.current.stop();
+    }
+    setIsWtRecording(false);
+  };
+
+  const sendCheckIn = () => {
+    supabase.channel(`broadcast-${familyId}`).send({
+      type: 'broadcast',
+      event: 'check-in',
+      payload: {
+        senderName: userName,
+        senderId: userId
+      }
+    });
+    showToast("¡Check-in 'Llegué Bien' enviado!");
+    playTonalSound('P2P_HANDSHAKE');
+  };
+
+  const toggleAccompaniedMode = () => {
+    if (accompaniedExpiresAt) {
+      // Cancel
+      setAccompaniedExpiresAt(null);
+      supabase.channel(`broadcast-${familyId}`).send({
+        type: 'broadcast',
+        event: 'acompaniame-stop',
+        payload: { senderId: userId }
+      });
+      showToast("Modo Acompáñame desactivado.");
+    } else {
+      // Start
+      const expires = Date.now() + 15 * 60 * 1000;
+      setAccompaniedExpiresAt(expires);
+      supabase.channel(`broadcast-${familyId}`).send({
+        type: 'broadcast',
+        event: 'acompaniame-report',
+        payload: { senderId: userId, expiresAt: expires }
+      });
+      showToast("Modo Acompáñame ACTIVADO por 15 min.");
+      playTonalSound('CHAT_RECEIVE');
+    }
+  };
+
+  // Timer ticker for Acompáñame
+  useEffect(() => {
+    if (!accompaniedExpiresAt) {
+      setAccompaniedTimeLeft('');
+      return;
+    }
+
+    const updateTimer = () => {
+      const diff = accompaniedExpiresAt - Date.now();
+      if (diff <= 0) {
+        setAccompaniedExpiresAt(null);
+        supabase.channel(`broadcast-${familyId}`).send({
+          type: 'broadcast',
+          event: 'acompaniame-stop',
+          payload: { senderId: userId }
+        });
+        showToast("El tiempo de acompañamiento ha terminado.");
+        playTonalSound('P2P_LOST');
+        return;
+      }
+      const mins = Math.floor(diff / 60000);
+      const secs = Math.floor((diff % 60000) / 1000);
+      setAccompaniedTimeLeft(`${mins}:${secs < 10 ? '0' : ''}${secs}`);
+    };
+
+    updateTimer();
+    const interval = setInterval(updateTimer, 1000);
+    return () => clearInterval(interval);
+  }, [accompaniedExpiresAt, familyId, userId]);
 
   const acquireWakeLock = async () => {
     try {
@@ -350,10 +525,38 @@ export default function ClientDashboard() {
       )
       .subscribe();
 
+    // Subscribe to Broadcast Channel (Walkie-Talkie & Check-in & Status Queries)
+    const broadcastChannel = supabase.channel(`broadcast-${familyId}`);
+    
+    broadcastChannel
+      .on('broadcast', { event: 'walkie-talkie' }, (payload: any) => {
+        if (payload.payload && payload.payload.senderId !== userId) {
+          playWalkieTalkie(payload.payload.audio, payload.payload.senderName);
+        }
+      })
+      .on('broadcast', { event: 'check-in' }, (payload: any) => {
+        if (payload.payload && payload.payload.senderId !== userId) {
+          showToast(`✓ Check-in de ${payload.payload.senderName}: ¡Llegué bien!`);
+          playTonalSound('CHAT_RECEIVE');
+        }
+      })
+      .on('broadcast', { event: 'request-status' }, () => {
+        const expires = accompaniedExpiresAtRef.current;
+        if (expires && expires > Date.now()) {
+          broadcastChannel.send({
+            type: 'broadcast',
+            event: 'acompaniame-report',
+            payload: { senderId: userId, expiresAt: expires }
+          });
+        }
+      })
+      .subscribe();
+
     return () => {
       alertsSub.unsubscribe();
       locationsSub.unsubscribe();
       messagesSub.unsubscribe();
+      broadcastChannel.unsubscribe();
     };
   }, [familyId, userId, addMessage, checkUpdates]);
 
@@ -886,18 +1089,33 @@ export default function ClientDashboard() {
         <TileLayer url={mapTheme === 'dark' ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"} />
         
         {myLocation && (
-          <Marker 
-            position={myLocation} 
-            icon={myIcon}
-            eventHandlers={{
-              click: () => {
-                setTrackingTargetId('me');
-                setMapCenterTarget(myLocation);
-              }
-            }}
-          >
-            <Popup>Tú (Rastreable)</Popup>
-          </Marker>
+          <>
+            <Marker 
+              position={myLocation} 
+              icon={myIcon}
+              eventHandlers={{
+                click: () => {
+                  setTrackingTargetId('me');
+                  setMapCenterTarget(myLocation);
+                }
+              }}
+            >
+              <Popup>Tú (Rastreable)</Popup>
+            </Marker>
+            {accompaniedExpiresAt && accompaniedExpiresAt > Date.now() && (
+              <Circle 
+                center={myLocation} 
+                radius={60} 
+                pathOptions={{ 
+                  color: '#ec4899', 
+                  fillColor: '#ec4899', 
+                  fillOpacity: 0.15,
+                  weight: 2,
+                  className: 'pulse-circle' 
+                }} 
+              />
+            )}
+          </>
         )}
 
         {Object.entries(familyMembers).map(([id, member]) => {
@@ -1034,6 +1252,107 @@ export default function ClientDashboard() {
       >
         <MessageSquare size={24} />
       </button>
+
+      {/* Botón flotante Llegué Bien */}
+      <button 
+        onClick={sendCheckIn}
+        style={{ 
+          position: 'absolute', 
+          bottom: '80px', 
+          left: '16px', 
+          zIndex: 1000, 
+          background: 'rgba(30,27,75,0.85)', 
+          border: '1px solid rgba(255,255,255,0.15)', 
+          color: '#4ade80', 
+          width: '56px', 
+          height: '56px', 
+          borderRadius: '50%', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          boxShadow: '0 4px 12px rgba(0,0,0,0.3)', 
+          cursor: 'pointer'
+        }}
+        title="Check-in: Avisa que llegaste bien"
+      >
+        <Check size={24} />
+      </button>
+
+      {/* Botón flotante Acompáñame a Casa */}
+      <button 
+        onClick={toggleAccompaniedMode}
+        style={{ 
+          position: 'absolute', 
+          bottom: '144px', 
+          left: '16px', 
+          zIndex: 1000, 
+          background: accompaniedExpiresAt ? '#ec4899' : 'rgba(30,27,75,0.85)', 
+          border: accompaniedExpiresAt ? '2px solid #ec4899' : '1px solid rgba(255,255,255,0.15)', 
+          color: 'white', 
+          width: '56px', 
+          height: '56px', 
+          borderRadius: '50%', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          boxShadow: accompaniedExpiresAt ? '0 0 15px rgba(236,72,153,0.5)' : '0 4px 12px rgba(0,0,0,0.3)', 
+          cursor: 'pointer'
+        }}
+        title="Acompáñame: Solicita monitoreo activo durante 15 minutos"
+      >
+        <Clock size={24} style={{ animation: accompaniedExpiresAt ? 'pulse 2s infinite' : 'none' }} />
+      </button>
+
+      {/* Botón flotante Walkie-Talkie */}
+      <button 
+        onMouseDown={startWtRecording} 
+        onMouseUp={stopWtRecording}
+        onTouchStart={startWtRecording} 
+        onTouchEnd={stopWtRecording}
+        style={{ 
+          position: 'absolute', 
+          bottom: '208px', 
+          left: '16px', 
+          zIndex: 1000, 
+          background: isWtRecording ? '#ef4444' : 'rgba(30,27,75,0.85)', 
+          border: isWtRecording ? '2px solid #ef4444' : '1px solid rgba(255,255,255,0.15)', 
+          color: 'white', 
+          width: '56px', 
+          height: '56px', 
+          borderRadius: '50%', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          boxShadow: isWtRecording ? '0 0 20px #ef4444' : '0 4px 12px rgba(0,0,0,0.3)', 
+          cursor: 'pointer',
+          touchAction: 'none'
+        }}
+        title="Walkie-Talkie: Mantén pulsado para hablar"
+      >
+        <Mic size={24} style={{ animation: isWtRecording ? 'pulse 1s infinite' : 'none' }} />
+      </button>
+
+      {/* Banner de Acompañamiento Activo */}
+      {accompaniedExpiresAt && (
+        <div style={{ position: 'absolute', top: '16px', left: '50%', transform: 'translateX(-50%)', zIndex: 9999, background: 'rgba(236,72,153,0.95)', color: 'white', padding: '12px 20px', borderRadius: '24px', display: 'flex', alignItems: 'center', gap: '12px', boxShadow: '0 4px 20px rgba(236, 72, 153, 0.4)', fontWeight: 'bold', fontSize: '13px' }}>
+          <span>⏱️ Acompañamiento Activo: {accompaniedTimeLeft}</span>
+          <button onClick={toggleAccompaniedMode} style={{ background: 'white', color: '#ec4899', border: 'none', padding: '4px 10px', borderRadius: '12px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' }}>Cancelar</button>
+        </div>
+      )}
+
+      {/* Walkie-Talkie Playing Equalizer Overlay */}
+      {isWtPlaying && (
+        <div style={{ position: 'absolute', top: '80px', left: '50%', transform: 'translateX(-50%)', zIndex: 9999, background: 'rgba(15, 23, 42, 0.95)', border: '1px solid #4ade80', borderRadius: '24px', padding: '10px 20px', display: 'flex', alignItems: 'center', gap: '12px', boxShadow: '0 4px 20px rgba(74, 222, 128, 0.3)', color: 'white' }}>
+          <div className="eq-container">
+            <div className="eq-bar"></div>
+            <div className="eq-bar"></div>
+            <div className="eq-bar"></div>
+            <div className="eq-bar"></div>
+            <div className="eq-bar"></div>
+          </div>
+          <span style={{ fontSize: '13px', fontWeight: 'bold' }}>🎙️ Escuchando a {wtSender}...</span>
+        </div>
+      )}
 
       {/* Logo corporativo flotante en mapa (esquina inferior derecha) */}
       <div className="floating-brand-logo">

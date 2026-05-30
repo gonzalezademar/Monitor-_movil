@@ -1,7 +1,7 @@
 import { MapContainer, TileLayer, Marker, Popup, Circle, Polyline, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useStore, playTonalSound, type ChatMessage } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { QRCode } from 'react-qr-code';
@@ -129,14 +129,26 @@ export default function MonitorDashboard() {
   const [selectedChildForHistory, setSelectedChildForHistory] = useState<{ id: string; name: string } | null>(null);
   const [customHistoryDate, setCustomHistoryDate] = useState('');
 
+  // Walkie-Talkie & Acompáñame States
+  const [isWtRecording, setIsWtRecording] = useState(false);
+  const [isWtPlaying, setIsWtPlaying] = useState(false);
+  const [wtSender, setWtSender] = useState<string | null>(null);
+  const wtMediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const wtAudioChunksRef = useRef<Blob[]>([]);
+  const wtTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [accompaniedClients, setAccompaniedClients] = useState<Record<string, number>>({});
+
   const markerIconCache = useRef<Record<string, L.DivIcon>>({});
-  const getAvatarIcon = (id: string, avatar: string | null, isOnline: boolean, isMonitor: boolean) => {
-    const cacheKey = `${id}_${isOnline ? 'on' : 'off'}_${avatar || 'no_avatar'}_${isMonitor ? 'monitor' : 'client'}`;
+  const getAvatarIcon = (id: string, avatar: string | null, isOnline: boolean, isMonitor: boolean, isAccompanied?: boolean) => {
+    const cacheKey = `${id}_${isOnline ? 'on' : 'off'}_${avatar || 'no_avatar'}_${isMonitor ? 'monitor' : 'client'}_${isAccompanied ? 'acc' : 'no_acc'}`;
     if (!markerIconCache.current[cacheKey]) {
       const size = isMonitor ? 36 : 40;
-      const color = isMonitor ? '#c084fc' : (isOnline ? '#4ade80' : '#9ca3af');
+      let color = isMonitor ? '#c084fc' : (isOnline ? '#4ade80' : '#9ca3af');
+      if (isAccompanied) {
+        color = '#ec4899';
+      }
       markerIconCache.current[cacheKey] = L.divIcon({
-        className: 'custom-avatar-marker',
+        className: `custom-avatar-marker ${isAccompanied ? 'accompanied-glow' : ''}`,
         html: avatar 
           ? `<div style="width:${size}px;height:${size}px;border-radius:50%;overflow:hidden;border:3px solid ${color};box-shadow:0 0 10px ${color};"><img src="${avatar}" style="width:100%;height:100%;object-fit:cover;" /></div>` 
           : `<div style="width:${size}px;height:${size}px;background:${color};border-radius:50%;border:2px solid white;"></div>`,
@@ -145,6 +157,93 @@ export default function MonitorDashboard() {
       });
     }
     return markerIconCache.current[cacheKey];
+  };
+
+  const playWalkieTalkie = (base64Audio: string, senderName: string) => {
+    try {
+      playTonalSound('PTT_START');
+      setWtSender(senderName);
+      setIsWtPlaying(true);
+      const audioUrl = `data:audio/wav;base64,${base64Audio}`;
+      const audio = new Audio(audioUrl);
+      audio.play().then(() => {
+        audio.onended = () => {
+          setIsWtPlaying(false);
+          setWtSender(null);
+        };
+      }).catch(err => {
+        console.error("Audio playback error:", err);
+        setIsWtPlaying(false);
+        setWtSender(null);
+      });
+    } catch (e) {
+      console.error("WT decoding error:", e);
+      setIsWtPlaying(false);
+      setWtSender(null);
+    }
+  };
+
+  const startWtRecording = async (e?: React.MouseEvent | React.TouchEvent) => {
+    if (e) {
+      if (e.type === 'touchstart' || e.type === 'touchend') e.preventDefault();
+    }
+    if (isWtRecording) return;
+    try {
+      playTonalSound('PTT_START');
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      wtAudioChunksRef.current = [];
+      const mediaRecorder = new MediaRecorder(stream);
+      wtMediaRecorderRef.current = mediaRecorder;
+      
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) wtAudioChunksRef.current.push(event.data);
+      };
+      
+      mediaRecorder.onstop = () => {
+        stream.getTracks().forEach(track => track.stop());
+        const audioBlob = new Blob(wtAudioChunksRef.current, { type: 'audio/wav' });
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64 = reader.result as string;
+          const cleanBase64 = base64.split(',')[1];
+          
+          supabase.channel(`broadcast-${familyId}`).send({
+            type: 'broadcast',
+            event: 'walkie-talkie',
+            payload: {
+              audio: cleanBase64,
+              senderName: userName,
+              senderId: userId
+            }
+          });
+          showToast("🎙️ Walkie-Talkie enviado!");
+        };
+        reader.readAsDataURL(audioBlob);
+      };
+      
+      mediaRecorder.start();
+      setIsWtRecording(true);
+      
+      wtTimeoutRef.current = setTimeout(() => {
+        stopWtRecording();
+      }, 7000);
+    } catch (err) {
+      console.error("Error starting WT recording:", err);
+    }
+  };
+
+  const stopWtRecording = (e?: React.MouseEvent | React.TouchEvent) => {
+    if (e) {
+      if (e.type === 'touchstart' || e.type === 'touchend') e.preventDefault();
+    }
+    if (wtTimeoutRef.current) {
+      clearTimeout(wtTimeoutRef.current);
+      wtTimeoutRef.current = null;
+    }
+    if (wtMediaRecorderRef.current && wtMediaRecorderRef.current.state !== 'inactive') {
+      wtMediaRecorderRef.current.stop();
+    }
+    setIsWtRecording(false);
   };
   
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -441,11 +540,60 @@ export default function MonitorDashboard() {
       )
       .subscribe();
 
+    // Subscribe to Broadcast Channel (Walkie-Talkie & Check-in & Status Queries)
+    const broadcastChannel = supabase.channel(`broadcast-${familyId}`);
+    
+    broadcastChannel
+      .on('broadcast', { event: 'walkie-talkie' }, (payload: any) => {
+        if (payload.payload && payload.payload.senderId !== userId) {
+          playWalkieTalkie(payload.payload.audio, payload.payload.senderName);
+        }
+      })
+      .on('broadcast', { event: 'check-in' }, (payload: any) => {
+        if (payload.payload && payload.payload.senderId !== userId) {
+          showToast(`✓ Check-in de ${payload.payload.senderName}: ¡Llegué bien!`);
+          playTonalSound('CHAT_RECEIVE');
+        }
+      })
+      .on('broadcast', { event: 'acompaniame-report' }, (payload: any) => {
+        if (payload.payload) {
+          const { senderId, expiresAt } = payload.payload;
+          setAccompaniedClients(prev => ({
+            ...prev,
+            [senderId]: expiresAt
+          }));
+        }
+      })
+      .on('broadcast', { event: 'acompaniame-stop' }, (payload: any) => {
+        if (payload.payload) {
+          const { senderId } = payload.payload;
+          setAccompaniedClients(prev => {
+            const next = { ...prev };
+            delete next[senderId];
+            return next;
+          });
+        }
+      })
+      .on('broadcast', { event: 'request-status' }, () => {
+        // Monitor has no trackable status to report
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          // Query active statuses when we connect
+          broadcastChannel.send({
+            type: 'broadcast',
+            event: 'request-status',
+            payload: {}
+          });
+        }
+      });
+
     return () => {
       alertsSub.unsubscribe();
       locationsSub.unsubscribe();
       profilesSub.unsubscribe();
       messagesSub.unsubscribe();
+      broadcastChannel.unsubscribe();
     };
   }, [familyId, userId, myLocation, localRadius, addMessage, checkUpdates]);
 
@@ -817,20 +965,45 @@ export default function MonitorDashboard() {
 
         {Object.entries(clients).map(([id, client]) => {
           if (client.lat === 0 && client.lng === 0) return null;
+          const isAccompanied = !!(accompaniedClients[id] && (accompaniedClients[id] > Date.now()));
           return (
-            <Marker 
-              key={id} 
-              position={[client.lat, client.lng]} 
-              icon={getAvatarIcon(id, client.avatar, client.isOnline, client.role === 'monitor')}
-              eventHandlers={{
-                click: () => {
-                  setTrackingTargetId(id);
-                  setMapCenterTarget([client.lat, client.lng]);
-                }
-              }}
-            >
-              <Popup>{client.name} ({client.role === 'monitor' ? 'Tutor' : 'Hijo'})</Popup>
-            </Marker>
+            <React.Fragment key={id}>
+              <Marker 
+                position={[client.lat, client.lng]} 
+                icon={getAvatarIcon(id, client.avatar, client.isOnline, client.role === 'monitor', isAccompanied)}
+                eventHandlers={{
+                  click: () => {
+                    setTrackingTargetId(id);
+                    setMapCenterTarget([client.lat, client.lng]);
+                  }
+                }}
+              >
+                <Popup>
+                  <div style={{ textAlign: 'center' }}>
+                    <strong>{client.name}</strong> ({client.role === 'monitor' ? 'Tutor' : 'Hijo'})
+                    {isAccompanied && (
+                      <span style={{ display: 'block', color: '#ec4899', fontSize: '11px', marginTop: '4px', fontWeight: 'bold' }}>
+                        ⏱️ Acompañamiento Activo
+                      </span>
+                    )}
+                  </div>
+                </Popup>
+              </Marker>
+              
+              {isAccompanied && (
+                <Circle 
+                  center={[client.lat, client.lng]} 
+                  radius={60} 
+                  pathOptions={{ 
+                    color: '#ec4899', 
+                    fillColor: '#ec4899', 
+                    fillOpacity: 0.15,
+                    weight: 2,
+                    className: 'pulse-circle' 
+                  }} 
+                />
+              )}
+            </React.Fragment>
           );
         })}
 
@@ -925,6 +1098,49 @@ export default function MonitorDashboard() {
       >
         <MessageSquare size={24} />
       </button>
+
+      {/* Floating Walkie-Talkie Microphone Button */}
+      <button 
+        onMouseDown={startWtRecording} 
+        onMouseUp={stopWtRecording}
+        onTouchStart={startWtRecording} 
+        onTouchEnd={stopWtRecording}
+        style={{ 
+          position: 'absolute', 
+          bottom: '80px', 
+          left: '16px', 
+          zIndex: 1000, 
+          background: isWtRecording ? '#ef4444' : 'rgba(30,27,75,0.85)', 
+          border: isWtRecording ? '2px solid #ef4444' : '1px solid rgba(255,255,255,0.15)', 
+          color: 'white', 
+          width: '56px', 
+          height: '56px', 
+          borderRadius: '50%', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          boxShadow: isWtRecording ? '0 0 20px #ef4444' : '0 4px 12px rgba(0,0,0,0.3)', 
+          cursor: 'pointer',
+          touchAction: 'none'
+        }}
+        title="Walkie-Talkie: Mantén pulsado para hablar"
+      >
+        <Mic size={24} style={{ animation: isWtRecording ? 'pulse 1s infinite' : 'none' }} />
+      </button>
+
+      {/* Walkie-Talkie Listening Equalizer Overlay */}
+      {isWtPlaying && (
+        <div style={{ position: 'absolute', top: '80px', left: '50%', transform: 'translateX(-50%)', zIndex: 9999, background: 'rgba(15, 23, 42, 0.95)', border: '1px solid #4ade80', borderRadius: '24px', padding: '10px 20px', display: 'flex', alignItems: 'center', gap: '12px', boxShadow: '0 4px 20px rgba(74, 222, 128, 0.3)', color: 'white' }}>
+          <div className="eq-container">
+            <div className="eq-bar"></div>
+            <div className="eq-bar"></div>
+            <div className="eq-bar"></div>
+            <div className="eq-bar"></div>
+            <div className="eq-bar"></div>
+          </div>
+          <span style={{ fontSize: '13px', fontWeight: 'bold' }}>🎙️ Escuchando a {wtSender}...</span>
+        </div>
+      )}
 
       {/* Logo corporativo flotante en mapa (esquina inferior derecha) */}
       <div className="floating-brand-logo">
