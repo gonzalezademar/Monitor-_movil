@@ -1,7 +1,7 @@
 import { useStore } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
-import developerLogo from '../assets/developer_logo.png';
+import { AgLogoFull } from '../components/BrandLogo';
 import { QRCode } from 'react-qr-code';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import { ShieldAlert, User, QrCode, ArrowLeft, Camera, RefreshCcw, Radar, Mail, Lock, Eye, EyeOff, Clock, MapPin } from 'lucide-react';
@@ -245,8 +245,8 @@ export default function Onboarding() {
     <div className="onboarding-container">
       {/* Brand logo at the top */}
       <div style={{ marginBottom: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', zIndex: 10 }}>
-        <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '215px', opacity: 1.0, filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.3))' }} />
-        <p style={{ fontSize: '11px', opacity: 0.7, margin: 0, color: '#a78bfa', fontWeight: '500' }}>🛡️ Seguridad en la Nube con Supabase</p>
+        <AgLogoFull size={48} />
+        <p style={{ fontSize: '11px', opacity: 0.7, margin: '8px 0 0 0', color: '#a78bfa', fontWeight: '500' }}>🛡️ Seguridad en la Nube con Supabase</p>
       </div>
       {/* Floating Error Alert */}
       {formError && mode !== 'welcome' && (

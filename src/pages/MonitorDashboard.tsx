@@ -8,7 +8,7 @@ import { QRCode } from 'react-qr-code';
 import { Menu, X, QrCode, LogOut, AlertCircle, ShieldAlert, Smartphone, MessageSquare, Send, Mic, Bell, Camera, Sun, Moon, Image, Clock, Zap, Battery } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
 import { supabase } from '../supabaseClient';
-import developerLogo from '../assets/developer_logo.png';
+import { AgIsotype, AgLogoFull } from '../components/BrandLogo';
 
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
@@ -994,17 +994,17 @@ export default function MonitorDashboard() {
   return (
     <div className="dashboard-container" style={{ position: 'relative', overflow: 'hidden' }}>
       <header className="app-header">
-        <div className="header-logo-container">
-          <img src={developerLogo} alt="AG Creations" className="header-logo" />
-          <div className="header-divider" />
-          <div className="header-credits">
-            <span className="credit-label">Desarrollado por</span>
-            <span className="credit-author">Adelio González</span>
-          </div>
+        <div className="header-left">
+          <AgIsotype size={32} />
         </div>
-        <button className="header-menu-btn" onClick={openMenu} title="Abrir Menú">
-          <Menu size={28} color="white" />
-        </button>
+        <div className="header-center">
+          Radar Familiar
+        </div>
+        <div className="header-right">
+          <button className="header-menu-btn" onClick={openMenu} title="Abrir Menú">
+            <Menu size={28} color="white" />
+          </button>
+        </div>
       </header>
 
       {isProgrammingSafeZone && (
@@ -1431,8 +1431,8 @@ export default function MonitorDashboard() {
             <h2 style={{ fontSize: '18px', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}><ShieldAlert size={20} color="#ec4899" />Radar Familiar</h2>
             <button className="icon-btn" onClick={() => setIsMenuOpen(false)} style={{ marginRight: '-8px' }}><X size={24} /></button>
           </div>
-          <div style={{ paddingLeft: '4px', width: '100%' }}>
-            <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '190px' }} />
+          <div style={{ paddingLeft: '4px', width: '100%', marginTop: '4px' }}>
+            <AgLogoFull size={40} />
           </div>
         </div>
         
