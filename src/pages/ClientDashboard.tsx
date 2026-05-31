@@ -22,11 +22,14 @@ L.Icon.Default.mergeOptions({
 
 function MapAutoCenter({ target }: { target: [number, number] | null }) {
   const map = useMap();
+  const lat = target?.[0];
+  const lng = target?.[1];
+
   useEffect(() => {
-    if (target) {
-      map.flyTo(target, 16, { animate: true, duration: 1.5 });
+    if (lat !== undefined && lng !== undefined) {
+      map.flyTo([lat, lng], 16, { animate: true, duration: 1.5 });
     }
-  }, [target, map]);
+  }, [lat, lng, map]);
   return null;
 }
 
@@ -678,12 +681,18 @@ export default function ClientDashboard() {
     if (!trackingTargetId) return;
     if (trackingTargetId === 'me') {
       if (myLocation) {
-        setMapCenterTarget(myLocation);
+        setMapCenterTarget(prev => {
+          if (prev && prev[0] === myLocation[0] && prev[1] === myLocation[1]) return prev;
+          return myLocation;
+        });
       }
     } else {
       const target = familyMembers[trackingTargetId];
       if (target && target.lat !== 0 && target.lng !== 0) {
-        setMapCenterTarget([target.lat, target.lng]);
+        setMapCenterTarget(prev => {
+          if (prev && prev[0] === target.lat && prev[1] === target.lng) return prev;
+          return [target.lat, target.lng];
+        });
       }
     }
   }, [trackingTargetId, myLocation, familyMembers]);
@@ -1115,9 +1124,15 @@ export default function ClientDashboard() {
             </form>
           </div>
 
-          <button type="button" onClick={() => logout()} className="glass-btn secondary" style={{ opacity: 0.8, padding: '10px', fontSize: '13px' }}>
+          <button type="button" onClick={() => logout()} className="glass-btn secondary" style={{ opacity: 0.8, padding: '10px', fontSize: '13px', marginTop: '12px' }}>
             Cerrar Sesión
           </button>
+        </div>
+
+        {/* Footer credits */}
+        <div style={{ marginTop: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', opacity: 0.65, zIndex: 10, fontFamily: "'Inter', sans-serif" }}>
+          <span style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)', textTransform: 'uppercase', letterSpacing: '1.2px', fontWeight: 600 }}>Desarrollado por</span>
+          <span style={{ fontSize: '13px', color: '#fb923c', fontWeight: 'bold', letterSpacing: '0.5px', textShadow: '0 0 8px rgba(251, 146, 60, 0.2)' }}>Adelio González</span>
         </div>
 
       </div>
@@ -1565,6 +1580,12 @@ export default function ClientDashboard() {
             >
               <LogOut size={16} /> Desvincular Dispositivo
             </button>
+          </div>
+
+          {/* Footer credits inside the sidebar */}
+          <div style={{ marginTop: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', opacity: 0.6 }}>
+            <span style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 600 }}>Desarrollado por</span>
+            <span style={{ fontSize: '12px', color: '#fb923c', fontWeight: 'bold', textShadow: '0 0 8px rgba(251, 146, 60, 0.2)' }}>Adelio González</span>
           </div>
         </div>
       </div>

@@ -23,11 +23,14 @@ L.Icon.Default.mergeOptions({
 
 function MapAutoCenter({ target }: { target: [number, number] | null }) {
   const map = useMap();
+  const lat = target?.[0];
+  const lng = target?.[1];
+
   useEffect(() => {
-    if (target) {
-      map.flyTo(target, 16, { animate: true, duration: 1.5 });
+    if (lat !== undefined && lng !== undefined) {
+      map.flyTo([lat, lng], 16, { animate: true, duration: 1.5 });
     }
-  }, [target, map]);
+  }, [lat, lng, map]);
   return null;
 }
 
@@ -740,16 +743,24 @@ export default function MonitorDashboard() {
 
   // Reactive Map Centering
   useEffect(() => {
-    if (!isAutoCentering || !trackingTargetId) return;
+    if (!isAutoCentering || !trackingTargetId || isProgrammingSafeZone) return;
     if (trackingTargetId === 'me') {
-      if (myLocation) setMapCenterTarget(myLocation);
+      if (myLocation) {
+        setMapCenterTarget(prev => {
+          if (prev && prev[0] === myLocation[0] && prev[1] === myLocation[1]) return prev;
+          return myLocation;
+        });
+      }
     } else {
       const client = clients[trackingTargetId];
       if (client && client.lat !== 0 && client.lng !== 0) {
-        setMapCenterTarget([client.lat, client.lng]);
+        setMapCenterTarget(prev => {
+          if (prev && prev[0] === client.lat && prev[1] === client.lng) return prev;
+          return [client.lat, client.lng];
+        });
       }
     }
-  }, [trackingTargetId, myLocation, clients, isAutoCentering]);
+  }, [trackingTargetId, myLocation, clients, isAutoCentering, isProgrammingSafeZone]);
 
   // Periodic connection timeouts watcher
   useEffect(() => {
@@ -1709,6 +1720,12 @@ export default function MonitorDashboard() {
             >
               <LogOut size={16} /> Cerrar Sesión
             </button>
+          </div>
+
+          {/* Footer credits inside the sidebar */}
+          <div style={{ marginTop: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', opacity: 0.6 }}>
+            <span style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 600 }}>Desarrollado por</span>
+            <span style={{ fontSize: '12px', color: '#fb923c', fontWeight: 'bold', textShadow: '0 0 8px rgba(251, 146, 60, 0.2)' }}>Adelio González</span>
           </div>
         </div>
       </div>

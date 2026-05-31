@@ -721,6 +721,12 @@ export default function Onboarding() {
 
       </div>
       
+      {/* Footer credits */}
+      <div style={{ marginTop: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', opacity: 0.65, zIndex: 10, fontFamily: "'Inter', sans-serif" }}>
+        <span style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)', textTransform: 'uppercase', letterSpacing: '1.2px', fontWeight: 600 }}>Desarrollado por</span>
+        <span style={{ fontSize: '13px', color: '#fb923c', fontWeight: 'bold', letterSpacing: '0.5px', textShadow: '0 0 8px rgba(251, 146, 60, 0.2)' }}>Adelio González</span>
+      </div>
+
     </div>
   );
 }
