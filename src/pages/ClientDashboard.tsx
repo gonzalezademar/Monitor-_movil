@@ -222,6 +222,8 @@ export default function ClientDashboard() {
   const wtMediaRecorderRef = useRef<MediaRecorder | null>(null);
   const wtAudioChunksRef = useRef<Blob[]>([]);
   const wtTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [wtCountdown, setWtCountdown] = useState(7);
+  const wtCountdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Acompáñame States
   const [accompaniedExpiresAt, setAccompaniedExpiresAt] = useState<number | null>(null);
@@ -353,6 +355,20 @@ export default function ClientDashboard() {
       
       mediaRecorder.start();
       setIsWtRecording(true);
+      setWtCountdown(7);
+
+      if (wtCountdownIntervalRef.current) clearInterval(wtCountdownIntervalRef.current);
+      let count = 7;
+      wtCountdownIntervalRef.current = setInterval(() => {
+        count -= 1;
+        setWtCountdown(count);
+        if (count <= 0) {
+          if (wtCountdownIntervalRef.current) {
+            clearInterval(wtCountdownIntervalRef.current);
+            wtCountdownIntervalRef.current = null;
+          }
+        }
+      }, 1000);
       
       wtTimeoutRef.current = setTimeout(() => {
         stopWtRecording();
@@ -370,10 +386,15 @@ export default function ClientDashboard() {
       clearTimeout(wtTimeoutRef.current);
       wtTimeoutRef.current = null;
     }
+    if (wtCountdownIntervalRef.current) {
+      clearInterval(wtCountdownIntervalRef.current);
+      wtCountdownIntervalRef.current = null;
+    }
     if (wtMediaRecorderRef.current && wtMediaRecorderRef.current.state !== 'inactive') {
       wtMediaRecorderRef.current.stop();
     }
     setIsWtRecording(false);
+    setWtCountdown(7);
   };
 
   const sendCheckIn = () => {
@@ -1304,6 +1325,7 @@ export default function ClientDashboard() {
       if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
       if (leftSosIntervalRef.current) clearInterval(leftSosIntervalRef.current);
       if (rightSosIntervalRef.current) clearInterval(rightSosIntervalRef.current);
+      if (wtCountdownIntervalRef.current) clearInterval(wtCountdownIntervalRef.current);
     };
   }, []);
 
@@ -1964,7 +1986,13 @@ export default function ClientDashboard() {
         }}
         title="Walkie-Talkie: Mantén pulsado para hablar"
       >
-        <Mic size={24} style={{ animation: isWtRecording ? 'pulse 1s infinite' : 'none' }} />
+        {isWtRecording ? (
+          <span style={{ fontSize: '15px', fontWeight: '900', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {wtCountdown}s
+          </span>
+        ) : (
+          <Mic size={24} />
+        )}
       </button>
 
       {/* Banner de Acompañamiento Activo */}

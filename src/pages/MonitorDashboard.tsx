@@ -224,6 +224,8 @@ export default function MonitorDashboard() {
   const wtMediaRecorderRef = useRef<MediaRecorder | null>(null);
   const wtAudioChunksRef = useRef<Blob[]>([]);
   const wtTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [wtCountdown, setWtCountdown] = useState(7);
+  const wtCountdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [accompaniedClients, setAccompaniedClients] = useState<Record<string, number>>({});
 
   const markerIconCache = useRef<Record<string, L.DivIcon>>({});
@@ -345,6 +347,20 @@ export default function MonitorDashboard() {
       
       mediaRecorder.start();
       setIsWtRecording(true);
+      setWtCountdown(7);
+
+      if (wtCountdownIntervalRef.current) clearInterval(wtCountdownIntervalRef.current);
+      let count = 7;
+      wtCountdownIntervalRef.current = setInterval(() => {
+        count -= 1;
+        setWtCountdown(count);
+        if (count <= 0) {
+          if (wtCountdownIntervalRef.current) {
+            clearInterval(wtCountdownIntervalRef.current);
+            wtCountdownIntervalRef.current = null;
+          }
+        }
+      }, 1000);
       
       wtTimeoutRef.current = setTimeout(() => {
         stopWtRecording();
@@ -362,10 +378,15 @@ export default function MonitorDashboard() {
       clearTimeout(wtTimeoutRef.current);
       wtTimeoutRef.current = null;
     }
+    if (wtCountdownIntervalRef.current) {
+      clearInterval(wtCountdownIntervalRef.current);
+      wtCountdownIntervalRef.current = null;
+    }
     if (wtMediaRecorderRef.current && wtMediaRecorderRef.current.state !== 'inactive') {
       wtMediaRecorderRef.current.stop();
     }
     setIsWtRecording(false);
+    setWtCountdown(7);
   };
   
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -745,6 +766,7 @@ export default function MonitorDashboard() {
     return () => {
       stopSiren();
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+      if (wtCountdownIntervalRef.current) clearInterval(wtCountdownIntervalRef.current);
     };
   }, []);
 
@@ -1503,7 +1525,13 @@ export default function MonitorDashboard() {
         }}
         title="Walkie-Talkie: Mantén pulsado para hablar"
       >
-        <Mic size={24} style={{ animation: isWtRecording ? 'pulse 1s infinite' : 'none' }} />
+        {isWtRecording ? (
+          <span style={{ fontSize: '15px', fontWeight: '900', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {wtCountdown}s
+          </span>
+        ) : (
+          <Mic size={24} />
+        )}
       </button>
 
       {/* Walkie-Talkie Listening Equalizer Overlay */}
