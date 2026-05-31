@@ -562,9 +562,9 @@ body {
 
 .floating-brand-logo {
   position: absolute;
-  bottom: 16px;
-  right: 16px;
-  width: 140px;
+  top: 76px;
+  left: 16px;
+  width: 170px;
   z-index: 999;
   opacity: 0.85;
   pointer-events: none;

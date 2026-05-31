@@ -1,5 +1,5 @@
 import { useStore, playTonalSound, type ChatMessage } from '../store/useStore';
-import { useRef, useEffect, useState, useMemo } from 'react';
+import { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { Geolocation } from '@capacitor/geolocation';
 import { MapContainer, TileLayer, Marker, useMap, Popup, Circle } from 'react-leaflet';
 import L from 'leaflet';
@@ -163,8 +163,9 @@ export default function ClientDashboard() {
   const markerIconCache = useRef<Record<string, L.DivIcon>>({});
   const [gpsError, setGpsError] = useState<string | null>(null);
 
-  const getAvatarIcon = (id: string, avatar: string | null, isOnline: boolean, isMonitor: boolean, isAccompanied?: boolean) => {
-    const key = `${id}-${avatar || 'noavatar'}-${isOnline ? 'on' : 'off'}-${isAccompanied ? 'acc' : 'noacc'}`;
+  const getAvatarIcon = useCallback((id: string, avatar: string | null, isOnline: boolean, isMonitor: boolean, isAccompanied?: boolean) => {
+    const avatarKey = avatar ? `avatar_len_${avatar.length}` : 'noavatar';
+    const key = `${id}-${avatarKey}-${isOnline ? 'on' : 'off'}-${isAccompanied ? 'acc' : 'noacc'}`;
     if (!markerIconCache.current[key]) {
       let borderColor = isMonitor ? '#8b5cf6' : '#ec4899';
       let shadowColor = isMonitor ? 'rgba(139,92,246,0.4)' : 'rgba(236,72,153,0.4)';
@@ -184,7 +185,7 @@ export default function ClientDashboard() {
       });
     }
     return markerIconCache.current[key];
-  };
+  }, []);
 
   const playWalkieTalkie = (base64Audio: string, senderName: string) => {
     try {
@@ -1173,6 +1174,7 @@ export default function ClientDashboard() {
         {myLocation && (
           <>
             <Marker 
+              key={userId || 'me'}
               position={myLocation} 
               icon={myIcon}
               eventHandlers={{

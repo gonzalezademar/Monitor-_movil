@@ -1,7 +1,7 @@
 import { MapContainer, TileLayer, Marker, Popup, Circle, Polyline, useMap, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useStore, playTonalSound, type ChatMessage } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { QRCode } from 'react-qr-code';
@@ -51,14 +51,12 @@ function MapClickHandler({ onClick }: { onClick: (e: any) => void }) {
   return null;
 }
 
-const getSafeZoneIcon = () => {
-  return L.divIcon({
-    className: 'custom-safezone-marker',
-    html: `<div style="width:36px;height:36px;background:#ec4899;border-radius:50%;border:3px solid white;display:flex;align-items:center;justify-content:center;box-shadow:0 0 10px rgba(236,72,153,0.6);color:white;"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>`,
-    iconSize: [36, 36],
-    iconAnchor: [18, 18]
-  });
-};
+const safeZoneIcon = L.divIcon({
+  className: 'custom-safezone-marker',
+  html: `<div style="width:36px;height:36px;background:#ec4899;border-radius:50%;border:3px solid white;display:flex;align-items:center;justify-content:center;box-shadow:0 0 10px rgba(236,72,153,0.6);color:white;"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>`,
+  iconSize: [36, 36],
+  iconAnchor: [18, 18]
+});
 
 export default function MonitorDashboard() {
   const [showQR, setShowQR] = useState(false);
@@ -161,8 +159,9 @@ export default function MonitorDashboard() {
   const [accompaniedClients, setAccompaniedClients] = useState<Record<string, number>>({});
 
   const markerIconCache = useRef<Record<string, L.DivIcon>>({});
-  const getAvatarIcon = (id: string, avatar: string | null, isOnline: boolean, isMonitor: boolean, isAccompanied?: boolean) => {
-    const cacheKey = `${id}_${isOnline ? 'on' : 'off'}_${avatar || 'no_avatar'}_${isMonitor ? 'monitor' : 'client'}_${isAccompanied ? 'acc' : 'no_acc'}`;
+  const getAvatarIcon = useCallback((id: string, avatar: string | null, isOnline: boolean, isMonitor: boolean, isAccompanied?: boolean) => {
+    const avatarKey = avatar ? `avatar_len_${avatar.length}` : 'no_avatar';
+    const cacheKey = `${id}_${isOnline ? 'on' : 'off'}_${avatarKey}_${isMonitor ? 'monitor' : 'client'}_${isAccompanied ? 'acc' : 'no_acc'}`;
     if (!markerIconCache.current[cacheKey]) {
       const size = isMonitor ? 36 : 40;
       let color = isMonitor ? '#c084fc' : (isOnline ? '#4ade80' : '#9ca3af');
@@ -179,7 +178,7 @@ export default function MonitorDashboard() {
       });
     }
     return markerIconCache.current[cacheKey];
-  };
+  }, []);
 
   const playWalkieTalkie = (base64Audio: string, senderName: string) => {
     try {
@@ -1001,6 +1000,7 @@ export default function MonitorDashboard() {
         
         {myLocation && (
           <Marker 
+            key={userId || 'me'}
             position={myLocation} 
             icon={getAvatarIcon(userId || 'me', avatarBase64, true, true)}
             eventHandlers={{
@@ -1020,8 +1020,9 @@ export default function MonitorDashboard() {
 
         {fenceCenterLat !== null && fenceCenterLng !== null && (
           <Marker 
+            key="safezone"
             position={[fenceCenterLat, fenceCenterLng]} 
-            icon={getSafeZoneIcon()}
+            icon={safeZoneIcon}
           >
             <Popup>Centro de la Zona Segura</Popup>
           </Marker>
@@ -1033,6 +1034,7 @@ export default function MonitorDashboard() {
           return (
             <React.Fragment key={id}>
               <Marker 
+                key={id}
                 position={[client.lat, client.lng]} 
                 icon={getAvatarIcon(id, client.avatar, client.isOnline, client.role === 'monitor', isAccompanied)}
                 eventHandlers={{
