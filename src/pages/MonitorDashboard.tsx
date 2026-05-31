@@ -1,4 +1,4 @@
-import { MapContainer, TileLayer, Marker, Popup, Circle, Polyline, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Circle, Polyline, useMap, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import React, { useState, useEffect, useRef } from 'react';
@@ -42,6 +42,24 @@ function getDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
   return R * c;
 }
 
+function MapClickHandler({ onClick }: { onClick: (e: any) => void }) {
+  useMapEvents({
+    click(e) {
+      onClick(e);
+    }
+  });
+  return null;
+}
+
+const getSafeZoneIcon = () => {
+  return L.divIcon({
+    className: 'custom-safezone-marker',
+    html: `<div style="width:36px;height:36px;background:#ec4899;border-radius:50%;border:3px solid white;display:flex;align-items:center;justify-content:center;box-shadow:0 0 10px rgba(236,72,153,0.6);color:white;"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>`,
+    iconSize: [36, 36],
+    iconAnchor: [18, 18]
+  });
+};
+
 export default function MonitorDashboard() {
   const [showQR, setShowQR] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -53,6 +71,9 @@ export default function MonitorDashboard() {
     logout, 
     fenceRadius, 
     setFenceRadius, 
+    fenceCenterLat,
+    fenceCenterLng,
+    setFenceCenter,
     userName, 
     avatarBase64, 
     messages, 
@@ -72,6 +93,7 @@ export default function MonitorDashboard() {
     setIsMenuOpen(true);
   };
   const [localRadius, setLocalRadius] = useState(fenceRadius);
+  const [isSelectingCenterOnMap, setIsSelectingCenterOnMap] = useState(false);
 
   const confirmLogout = () => {
     if (unlinkConfirmName.trim() === userName.trim()) {
@@ -455,8 +477,10 @@ export default function MonitorDashboard() {
                 const clientName = updated[row.user_id].name;
                 
                 // Geofence checking
-                if (myLocation) {
-                  const dist = getDistance(myLocation[0], myLocation[1], row.latitude, row.longitude);
+                const centerLat = fenceCenterLat !== null ? fenceCenterLat : (myLocation ? myLocation[0] : null);
+                const centerLng = fenceCenterLng !== null ? fenceCenterLng : (myLocation ? myLocation[1] : null);
+                if (centerLat !== null && centerLng !== null) {
+                  const dist = getDistance(centerLat, centerLng, row.latitude, row.longitude);
                   if (dist > localRadius) {
                     const currentStrikes = (geofenceStrikesRef.current[clientName] || 0) + 1;
                     geofenceStrikesRef.current[clientName] = currentStrikes;
@@ -602,7 +626,7 @@ export default function MonitorDashboard() {
       messagesSub.unsubscribe();
       broadcastChannel.unsubscribe();
     };
-  }, [familyId, userId, myLocation, localRadius, addMessage, checkUpdates]);
+  }, [familyId, userId, myLocation, localRadius, fenceCenterLat, fenceCenterLng, addMessage, checkUpdates]);
 
   // Cleanup active timeouts/intervals on unmount to prevent state updates/audio leaks
   useEffect(() => {
@@ -919,8 +943,17 @@ export default function MonitorDashboard() {
     }
   };
 
+  const fenceCenter: [number, number] | null = fenceCenterLat !== null && fenceCenterLng !== null
+    ? [fenceCenterLat, fenceCenterLng]
+    : myLocation;
+
   return (
     <div className="dashboard-container" style={{ position: 'relative', overflow: 'hidden' }}>
+      {isSelectingCenterOnMap && (
+        <div style={{ position: 'absolute', top: 75, left: '50%', transform: 'translateX(-50%)', background: '#ec4899', color: 'white', padding: '12px 24px', borderRadius: '12px', zIndex: 9999, fontSize: '13px', fontWeight: 'bold', boxShadow: '0 4px 20px rgba(236, 72, 153, 0.4)', animation: 'pulse 2s infinite' }}>
+          📍 Toca en cualquier lugar del mapa para fijar la zona segura
+        </div>
+      )}
       {toastMessage && (
         <div style={{ position: 'absolute', top: 75, left: '50%', transform: 'translateX(-50%)', background: 'rgba(30, 27, 75, 0.95)', border: '1px solid rgba(255, 255, 255, 0.1)', color: 'white', padding: '12px 24px', borderRadius: '12px', zIndex: 9999, fontSize: '13px', boxShadow: '0 4px 20px rgba(0,0,0,0.3)', pointerEvents: 'none' }}>
           {toastMessage}
@@ -957,24 +990,41 @@ export default function MonitorDashboard() {
 
       <MapContainer center={myLocation || [-34.6037, -58.3816]} zoom={15} style={{ height: '100dvh', width: '100vw' }} zoomControl={false}>
         <MapAutoCenter target={mapCenterTarget} />
+        <MapClickHandler onClick={(e) => {
+          if (isSelectingCenterOnMap) {
+            setFenceCenter(e.latlng.lat, e.latlng.lng);
+            setIsSelectingCenterOnMap(false);
+            showToast("📍 Zona segura fijada en el mapa");
+          }
+        }} />
         <TileLayer url={mapTheme === 'dark' ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"} />
         
         {myLocation && (
-          <>
-            <Marker 
-              position={myLocation} 
-              icon={getAvatarIcon(userId || 'me', avatarBase64, true, true)}
-              eventHandlers={{
-                click: () => {
-                  setTrackingTargetId('me');
-                  setMapCenterTarget(myLocation);
-                }
-              }}
-            >
-              <Popup>Tú (Padre / Tutor)</Popup>
-            </Marker>
-            <Circle center={myLocation} radius={localRadius} pathOptions={{ color: '#ec4899', fillColor: '#ec4899', fillOpacity: 0.08 }} />
-          </>
+          <Marker 
+            position={myLocation} 
+            icon={getAvatarIcon(userId || 'me', avatarBase64, true, true)}
+            eventHandlers={{
+              click: () => {
+                setTrackingTargetId('me');
+                setMapCenterTarget(myLocation);
+              }
+            }}
+          >
+            <Popup>Tú (Padre / Tutor)</Popup>
+          </Marker>
+        )}
+
+        {fenceCenter && (
+          <Circle center={fenceCenter} radius={localRadius} pathOptions={{ color: '#ec4899', fillColor: '#ec4899', fillOpacity: 0.08 }} />
+        )}
+
+        {fenceCenterLat !== null && fenceCenterLng !== null && (
+          <Marker 
+            position={[fenceCenterLat, fenceCenterLng]} 
+            icon={getSafeZoneIcon()}
+          >
+            <Popup>Centro de la Zona Segura</Popup>
+          </Marker>
         )}
 
         {Object.entries(clients).map(([id, client]) => {
@@ -1253,6 +1303,56 @@ export default function MonitorDashboard() {
               }} 
               style={{ flex: 1, accentColor: '#ec4899' }} 
             />
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px', background: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ opacity: 0.8 }}>Modo de Cerco:</span>
+              <span style={{ fontWeight: 'bold', color: fenceCenterLat !== null ? '#f472b6' : '#4ade80' }}>
+                {fenceCenterLat !== null ? '📍 Estático (Fijo)' : '🔄 Dinámico (Móvil)'}
+              </span>
+            </div>
+            
+            <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+              <button 
+                onClick={() => setIsSelectingCenterOnMap(!isSelectingCenterOnMap)} 
+                className={`glass-btn ${isSelectingCenterOnMap ? 'primary' : ''}`}
+                style={{ flex: 1, padding: '6px', fontSize: '11px', background: isSelectingCenterOnMap ? '#ec4899' : 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', cursor: 'pointer' }}
+              >
+                {isSelectingCenterOnMap ? 'Toca el mapa...' : 'Fijar en Mapa'}
+              </button>
+              
+              {Object.entries(clients).length > 0 && (
+                <button 
+                  onClick={() => {
+                    const targetClient = clients[trackingTargetId] || Object.values(clients).find(c => c.lat !== 0);
+                    if (targetClient && targetClient.lat !== 0) {
+                      setFenceCenter(targetClient.lat, targetClient.lng);
+                      showToast(`📍 Zona fija anclada en ${targetClient.name}`);
+                    } else {
+                      showToast("No hay ubicación del familiar disponible");
+                    }
+                  }} 
+                  className="glass-btn"
+                  style={{ flex: 1, padding: '6px', fontSize: '11px', background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', cursor: 'pointer' }}
+                >
+                  Anclar en Hijo
+                </button>
+              )}
+            </div>
+
+            {fenceCenterLat !== null && (
+              <button 
+                onClick={() => {
+                  setFenceCenter(null, null);
+                  showToast("🔄 Zona segura restablecida (sigue al Padre)");
+                }} 
+                className="glass-btn"
+                style={{ width: '100%', padding: '6px', fontSize: '11px', background: 'rgba(239,68,68,0.15)', color: '#fca5a5', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '6px', cursor: 'pointer', marginTop: '2px' }}
+              >
+                Restablecer (Seguir al Padre)
+              </button>
+            )}
           </div>
         </div>
 

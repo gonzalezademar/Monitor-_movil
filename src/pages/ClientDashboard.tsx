@@ -57,6 +57,7 @@ export default function ClientDashboard() {
   };
 
   const sosTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sosIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tapCountRef  = useRef(0);
 
@@ -91,6 +92,8 @@ export default function ClientDashboard() {
   const [isUnlinkModalOpen, setIsUnlinkModalOpen] = useState(false);
   const [unlinkConfirmName, setUnlinkConfirmName] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [sosProgress, setSosProgress] = useState(0);
+  const [cancelProgress, setCancelProgress] = useState(0);
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 4000);
@@ -123,6 +126,7 @@ export default function ClientDashboard() {
   const audioChunksRef = useRef<Blob[]>([]);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const cancelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const wakeLockRef = useRef<any>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -828,42 +832,102 @@ export default function ClientDashboard() {
     if (e && e.type === 'touchstart') {
       e.preventDefault();
     }
-    if (sosTimerRef.current) clearTimeout(sosTimerRef.current);
-    sosTimerRef.current = setTimeout(() => {
-      setSOSActive(true);
-    }, 3000);
+    if (sosTimerRef.current) {
+      clearTimeout(sosTimerRef.current);
+      sosTimerRef.current = null;
+    }
+    if (sosIntervalRef.current) {
+      clearInterval(sosIntervalRef.current);
+      sosIntervalRef.current = null;
+    }
+    setSosProgress(0);
+    let currentProgress = 0;
+
+    sosIntervalRef.current = setInterval(() => {
+      currentProgress += 1;
+      setSosProgress(currentProgress);
+      
+      if (currentProgress % 10 === 0 && currentProgress < 100) {
+        if ('vibrate' in navigator) {
+          navigator.vibrate(40);
+        }
+      }
+      
+      if (currentProgress >= 100) {
+        if (sosIntervalRef.current) {
+          clearInterval(sosIntervalRef.current);
+          sosIntervalRef.current = null;
+        }
+        setSOSActive(true);
+        setSosProgress(0);
+        if ('vibrate' in navigator) {
+          navigator.vibrate([150, 80, 150]);
+        }
+      }
+    }, 30);
   };
 
   const handleSOSPressEnd = (e?: React.MouseEvent | React.TouchEvent) => {
     if (e && e.type === 'touchend') {
       e.preventDefault();
     }
-    if (sosTimerRef.current) {
-      clearTimeout(sosTimerRef.current);
-      sosTimerRef.current = null;
+    if (sosIntervalRef.current) {
+      clearInterval(sosIntervalRef.current);
+      sosIntervalRef.current = null;
     }
+    setSosProgress(0);
   };
 
   const startCancelSOS = (e?: React.MouseEvent | React.TouchEvent) => {
     if (e && e.type === 'touchstart') {
       e.preventDefault();
     }
-    if (cancelTimerRef.current) clearTimeout(cancelTimerRef.current);
-    cancelTimerRef.current = setTimeout(() => {
-      setSOSActive(false);
-      setGhostModeActive(false);
-      releaseWakeLock();
-    }, 3000);
+    if (cancelTimerRef.current) {
+      clearTimeout(cancelTimerRef.current);
+      cancelTimerRef.current = null;
+    }
+    if (cancelIntervalRef.current) {
+      clearInterval(cancelIntervalRef.current);
+      cancelIntervalRef.current = null;
+    }
+    setCancelProgress(0);
+    let currentProgress = 0;
+
+    cancelIntervalRef.current = setInterval(() => {
+      currentProgress += 1;
+      setCancelProgress(currentProgress);
+      
+      if (currentProgress % 10 === 0 && currentProgress < 100) {
+        if ('vibrate' in navigator) {
+          navigator.vibrate(40);
+        }
+      }
+      
+      if (currentProgress >= 100) {
+        if (cancelIntervalRef.current) {
+          clearInterval(cancelIntervalRef.current);
+          cancelIntervalRef.current = null;
+        }
+        setSOSActive(false);
+        setGhostModeActive(false);
+        releaseWakeLock();
+        setCancelProgress(0);
+        if ('vibrate' in navigator) {
+          navigator.vibrate([150, 80, 150]);
+        }
+      }
+    }, 30);
   };
 
   const stopCancelSOS = (e?: React.MouseEvent | React.TouchEvent) => {
     if (e && e.type === 'touchend') {
       e.preventDefault();
     }
-    if (cancelTimerRef.current) {
-      clearTimeout(cancelTimerRef.current);
-      cancelTimerRef.current = null;
+    if (cancelIntervalRef.current) {
+      clearInterval(cancelIntervalRef.current);
+      cancelIntervalRef.current = null;
     }
+    setCancelProgress(0);
   };
 
   const handleBlackoutTap = () => {
@@ -944,7 +1008,9 @@ export default function ClientDashboard() {
   useEffect(() => {
     return () => {
       if (sosTimerRef.current) clearTimeout(sosTimerRef.current);
+      if (sosIntervalRef.current) clearInterval(sosIntervalRef.current);
       if (cancelTimerRef.current) clearTimeout(cancelTimerRef.current);
+      if (cancelIntervalRef.current) clearInterval(cancelIntervalRef.current);
       if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
     };
   }, []);
@@ -959,6 +1025,12 @@ export default function ClientDashboard() {
   if (!familyId) {
     return (
       <div className="onboarding-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: 'linear-gradient(135deg, #0f0c20, #15102a, #06020f)', color: 'white', padding: '20px' }}>
+        {/* Brand logo at the top */}
+        <div style={{ marginBottom: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', zIndex: 10 }}>
+          <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '215px', opacity: 1.0, filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.3))' }} />
+          <p style={{ fontSize: '11px', opacity: 0.7, margin: 0, color: '#a78bfa', fontWeight: '500' }}>🛡️ Seguridad en la Nube con Supabase</p>
+        </div>
+
         {formError && (
           <div style={{
             position: 'absolute', top: '16px', left: '16px', right: '16px',
@@ -1047,11 +1119,6 @@ export default function ClientDashboard() {
           </button>
         </div>
 
-        {/* Brand logo at the bottom */}
-        <div style={{ marginTop: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
-          <img src={developerLogo} alt="AG Creation" style={{ width: '190px', opacity: 1.0, filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.3))' }} />
-          <p style={{ fontSize: '11px', opacity: 0.7, color: '#a78bfa', fontWeight: '500' }}>🛡️ Seguridad en la Nube con Supabase</p>
-        </div>
       </div>
     );
   }
@@ -1062,9 +1129,24 @@ export default function ClientDashboard() {
          <button 
            onMouseDown={startCancelSOS} onMouseUp={stopCancelSOS} onMouseLeave={stopCancelSOS} 
            onTouchStart={startCancelSOS} onTouchEnd={stopCancelSOS} 
-           style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: 'rgba(255,255,255,0.5)', padding: '12px 24px', borderRadius: '24px', fontSize: '14px', zIndex: 10, touchAction: 'none' }}
+           style={{ 
+             background: cancelProgress > 0 
+               ? `linear-gradient(90deg, rgba(239, 68, 68, 0.4) ${cancelProgress}%, rgba(255,255,255,0.08) ${cancelProgress}%)` 
+               : 'rgba(255,255,255,0.1)', 
+             border: cancelProgress > 0 ? '1px solid rgba(239, 68, 68, 0.5)' : '1px solid rgba(255,255,255,0.2)', 
+             color: cancelProgress > 0 ? 'white' : 'rgba(255,255,255,0.6)', 
+             padding: '16px 32px', 
+             borderRadius: '24px', 
+             fontSize: '15px', 
+             fontWeight: 'bold',
+             zIndex: 10, 
+             touchAction: 'none',
+             transform: cancelProgress > 0 ? 'scale(1.05)' : 'scale(1)',
+             transition: 'transform 0.1s ease-out, background 0.05s linear',
+             boxShadow: cancelProgress > 0 ? '0 0 20px rgba(239, 68, 68, 0.3)' : 'none'
+           }}
          >
-           Mantener pulsado para cancelar SOS
+           {cancelProgress > 0 ? `Cancelando en ${Math.ceil((100 - cancelProgress) / 33)}s...` : 'Mantener pulsado para cancelar SOS'}
          </button>
       </div>
     );
@@ -1233,14 +1315,45 @@ export default function ClientDashboard() {
       </button>
 
       {/* Panel táctico de SOS (Pulsación de 3 segundos) */}
-      <div className="tactical-sos-panel">
+      <div className="tactical-sos-panel" style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {/* Dynamic circular progress ring */}
+        <div style={{
+          position: 'absolute',
+          width: '90px',
+          height: '90px',
+          borderRadius: '50%',
+          background: `conic-gradient(#ec4899 ${sosProgress}%, rgba(255, 255, 255, 0.1) ${sosProgress}%)`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          transition: sosProgress === 0 ? 'none' : 'background 0.05s linear',
+          boxShadow: sosProgress > 0 ? '0 0 15px rgba(236, 72, 153, 0.4)' : 'none',
+          pointerEvents: 'none'
+        }} />
         <button 
           onMouseDown={handleSOSPressStart} onMouseUp={handleSOSPressEnd} onMouseLeave={handleSOSPressEnd}
           onTouchStart={handleSOSPressStart} onTouchEnd={handleSOSPressEnd}
           className={`sos-btn ${isSOSActive ? 'active' : ''}`}
-          style={{ width: '80px', height: '80px', borderRadius: '50%', background: 'red', border: '3px solid white', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold', fontSize: '18px', boxShadow: '0 4px 20px rgba(255,0,0,0.5)', zIndex: 1000, touchAction: 'none' }}
+          style={{ 
+            width: '80px', 
+            height: '80px', 
+            borderRadius: '50%', 
+            background: sosProgress > 0 ? `rgb(${255 - Math.round(sosProgress * 1.5)}, 0, 0)` : 'red', 
+            border: 'none', 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            color: 'white', 
+            fontWeight: 'bold', 
+            fontSize: '18px', 
+            boxShadow: '0 4px 20px rgba(255,0,0,0.5)', 
+            zIndex: 1000, 
+            touchAction: 'none',
+            transform: sosProgress > 0 ? `scale(${1 + (sosProgress / 600)})` : 'scale(1)',
+            transition: 'transform 0.05s ease-out, background-color 0.1s'
+          }}
         >
-          SOS
+          {sosProgress > 0 ? `${Math.ceil((100 - sosProgress) / 33)}s` : 'SOS'}
         </button>
       </div>
 

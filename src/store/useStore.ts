@@ -29,6 +29,9 @@ interface AppState {
   setSOSActive: (active: boolean) => void;
   fenceRadius: number;
   setFenceRadius: (r: number) => void;
+  fenceCenterLat: number | null;
+  fenceCenterLng: number | null;
+  setFenceCenter: (lat: number | null, lng: number | null) => void;
   
   // Tactical Chat & Offline queue
   messages: ChatMessage[];
@@ -83,6 +86,9 @@ export const useStore = create<AppState>()(
       setSOSActive: (active) => set({ isSOSActive: active }),
       fenceRadius: 100,
       setFenceRadius: (r) => set({ fenceRadius: r }),
+      fenceCenterLat: null,
+      fenceCenterLng: null,
+      setFenceCenter: (lat, lng) => set({ fenceCenterLat: lat, fenceCenterLng: lng }),
       
       messages: [] as ChatMessage[],
       offlineQueue: [] as any[],
@@ -530,6 +536,8 @@ export const useStore = create<AppState>()(
         userEmail: state.userEmail,
         familyId: state.familyId,
         fenceRadius: state.fenceRadius,
+        fenceCenterLat: state.fenceCenterLat,
+        fenceCenterLng: state.fenceCenterLng,
         appVersion: state.appVersion
       })
     }
