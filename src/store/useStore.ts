@@ -81,7 +81,7 @@ interface AppState {
   joinFamily: (familyCode: string) => Promise<{ error: string | null }>;
   loadSession: () => Promise<void>;
   unlinkFamily: () => Promise<{ error: string | null }>;
-  updateTrackingStatus: (targetUserId: string, enabled: boolean) => Promise<{ error: string | null }>;
+  updateTrackingStatus: (targetUserId: string, enabled: boolean, expiresAt?: string | null) => Promise<{ error: string | null }>;
 }
 
 
@@ -652,10 +652,13 @@ export const useStore = create<AppState>()(
         return { error: null };
       },
 
-      updateTrackingStatus: async (targetUserId: string, enabled: boolean) => {
+      updateTrackingStatus: async (targetUserId: string, enabled: boolean, expiresAt: string | null = null) => {
         const { error } = await supabase
           .from('profiles')
-          .update({ tracking_enabled: enabled })
+          .update({ 
+            tracking_enabled: enabled,
+            tracking_expires_at: expiresAt
+          })
           .eq('id', targetUserId);
         if (error) return { error: error.message };
         return { error: null };

@@ -65,7 +65,18 @@ export default function ClientDashboard() {
   const tapCountRef  = useRef(0);
 
   const [myLocation, setMyLocation] = useState<[number, number] | null>(null);
-  const [familyMembers, setFamilyMembers] = useState<Record<string, { name: string; avatar: string | null; role: 'monitor' | 'client'; lat: number; lng: number; isOnline: boolean }>>({});
+  const [familyMembers, setFamilyMembers] = useState<Record<string, { 
+    name: string; 
+    avatar: string | null; 
+    role: 'monitor' | 'client'; 
+    lat: number; 
+    lng: number; 
+    isOnline: boolean;
+    tracking_enabled?: boolean;
+    tracking_expires_at?: string | null;
+    battery_level?: number;
+    battery_charging?: boolean;
+  }>>({});
   const [ghostModeActive, setGhostModeActive] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
@@ -82,6 +93,40 @@ export default function ClientDashboard() {
   const [mapCenterTarget, setMapCenterTarget] = useState<[number, number] | null>(null);
   const [mapTheme, setMapTheme] = useState<'dark' | 'light'>('dark');
   const [trackingTargetId, setTrackingTargetId] = useState<string>('me');
+  const [myBatteryLevel, setMyBatteryLevel] = useState<number>(100);
+  const [myBatteryCharging, setMyBatteryCharging] = useState<boolean>(false);
+  const trackingExpiresAtRef = useRef<string | null>(null);
+
+  const updateBatteryStatus = useCallback(async () => {
+    if (!userId) return;
+    try {
+      let level = 100;
+      let charging = false;
+      if ('getBattery' in navigator) {
+        const battery: any = await (navigator as any).getBattery();
+        level = Math.round(battery.level * 100);
+        charging = battery.charging;
+      }
+      setMyBatteryLevel(level);
+      setMyBatteryCharging(charging);
+
+      await supabase
+        .from('profiles')
+        .update({
+          battery_level: level,
+          battery_charging: charging
+        })
+        .eq('id', userId);
+    } catch (e) {
+      console.warn("Could not read battery status from device:", e);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    updateBatteryStatus();
+    const interval = setInterval(updateBatteryStatus, 120000);
+    return () => clearInterval(interval);
+  }, [updateBatteryStatus]);
 
   const audioCtxRef = useRef<AudioContext | null>(null);
   const oscillatorRef = useRef<OscillatorNode | null>(null);
@@ -137,14 +182,29 @@ export default function ClientDashboard() {
   const discardRecordingRef = useRef<boolean>(false);
 
   // Icons caching
-  const myIcon = useMemo(() => L.divIcon({ 
-    className: 'custom-avatar-marker', 
-    html: avatarBase64 
-      ? `<div style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid #4ade80;box-shadow:0 0 10px rgba(74,222,128,0.5);"><img src="${avatarBase64}" style="width:100%;height:100%;object-fit:cover;" /></div>` 
-      : `<div style="width:24px;height:24px;background:#4ade80;border-radius:50%;border:2px solid white;"></div>`, 
-    iconSize: [36, 36], 
-    iconAnchor: [18, 18] 
-  }), [avatarBase64]);
+  const myIcon = useMemo(() => {
+    const size = 40;
+    const color = trackingEnabled ? '#4ade80' : '#ef4444';
+    const batteryColor = myBatteryLevel < 20 ? '#fca5a5' : '#4ade80';
+    const batteryHtml = `<span style="position:absolute;bottom:-18px;font-size:11px;font-weight:bold;color:${batteryColor};text-shadow:1px 1px 0 #000,-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,0 2px 4px rgba(0,0,0,0.8);white-space:nowrap;z-index:999;">${myBatteryLevel}%${myBatteryCharging ? '⚡' : ''}</span>`;
+    
+    return L.divIcon({ 
+      className: 'custom-avatar-marker', 
+      html: `
+        <div style="position:relative;width:${size}px;height:${size}px;display:flex;justify-content:center;align-items:center;">
+          <div style="width:${size}px;height:${size}px;border-radius:50%;overflow:hidden;border:3px solid ${color};box-shadow:0 0 10px ${color};background:#15102a;display:flex;align-items:center;justify-content:center;">
+            ${avatarBase64 
+              ? `<img src="${avatarBase64}" style="width:100%;height:100%;object-fit:cover;" />` 
+              : `<span style="font-weight:bold;color:white;font-size:16px;">TÚ</span>`
+            }
+          </div>
+          ${batteryHtml}
+        </div>
+      `, 
+      iconSize: [size, size], 
+      iconAnchor: [size/2, size/2] 
+    });
+  }, [avatarBase64, trackingEnabled, myBatteryLevel, myBatteryCharging]);
 
   // Walkie-Talkie & Acompáñame States
   const [isWtRecording, setIsWtRecording] = useState(false);
@@ -166,25 +226,55 @@ export default function ClientDashboard() {
   const markerIconCache = useRef<Record<string, L.DivIcon>>({});
   const [gpsError, setGpsError] = useState<string | null>(null);
 
-  const getAvatarIcon = useCallback((id: string, avatar: string | null, isOnline: boolean, isMonitor: boolean, isAccompanied?: boolean) => {
+  const getAvatarIcon = useCallback((
+    id: string, 
+    avatar: string | null, 
+    isOnline: boolean, 
+    isMonitor: boolean, 
+    isAccompanied?: boolean,
+    trackingActive?: boolean,
+    batteryLevel?: number,
+    batteryCharging?: boolean,
+    name?: string
+  ) => {
     const avatarKey = avatar ? `avatar_len_${avatar.length}` : 'noavatar';
-    const key = `${id}-${avatarKey}-${isOnline ? 'on' : 'off'}-${isAccompanied ? 'acc' : 'noacc'}`;
+    const trackingKey = trackingActive ? 'act' : 'inact';
+    const batteryKey = batteryLevel !== undefined ? `bat_${batteryLevel}` : 'no_bat';
+    const chargingKey = batteryCharging ? 'chg' : 'no_chg';
+    const key = `${id}-${avatarKey}-${isOnline ? 'on' : 'off'}-${isAccompanied ? 'acc' : 'noacc'}-${trackingKey}-${batteryKey}-${chargingKey}`;
+
     if (!markerIconCache.current[key]) {
-      let borderColor = isMonitor ? '#8b5cf6' : '#ec4899';
-      let shadowColor = isMonitor ? 'rgba(139,92,246,0.4)' : 'rgba(236,72,153,0.4)';
-      if (isAccompanied) {
-        borderColor = '#ec4899';
-        shadowColor = 'rgba(236,72,153,0.8)';
+      const size = isMonitor ? 36 : 40;
+      let color = '#ef4444'; // Inactive client by default (red border)
+      if (isMonitor) {
+        color = '#c084fc';
+      } else if (isAccompanied) {
+        color = '#ec4899';
+      } else if (trackingActive) {
+        color = '#4ade80';
       }
-      const opacity = isOnline ? '1' : '0.55';
+
+      const initial = (name || '?').charAt(0).toUpperCase();
+      const batteryColor = (batteryLevel !== undefined && batteryLevel < 20) ? '#fca5a5' : '#4ade80';
+      const batteryHtml = (!isMonitor && batteryLevel !== undefined)
+        ? `<span style="position:absolute;bottom:-18px;font-size:11px;font-weight:bold;color:${batteryColor};text-shadow:1px 1px 0 #000,-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,0 2px 4px rgba(0,0,0,0.8);white-space:nowrap;z-index:999;">${batteryLevel}%${batteryCharging ? '⚡' : ''}</span>`
+        : '';
 
       markerIconCache.current[key] = L.divIcon({
         className: `custom-member-marker ${isOnline ? 'online' : 'offline'} ${isAccompanied ? 'accompanied-glow' : ''}`,
-        html: avatar 
-          ? `<div style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid ${borderColor};box-shadow:0 0 10px ${shadowColor};opacity:${opacity};"><img src="${avatar}" style="width:100%;height:100%;object-fit:cover;" /></div>`
-          : `<div style="width:24px;height:24px;background:${borderColor};border-radius:50%;border:2px solid white;opacity:${opacity};"></div>`,
-        iconSize: [36, 36],
-        iconAnchor: [18, 18]
+        html: `
+          <div style="position:relative;width:${size}px;height:${size}px;display:flex;justify-content:center;align-items:center;">
+            <div style="width:${size}px;height:${size}px;border-radius:50%;overflow:hidden;border:3px solid ${color};box-shadow:0 0 10px ${color};background:#15102a;display:flex;align-items:center;justify-content:center;">
+              ${avatar 
+                ? `<img src="${avatar}" style="width:100%;height:100%;object-fit:cover;" />` 
+                : `<span style="font-weight:bold;color:white;font-size:16px;">${initial}</span>`
+              }
+            </div>
+            ${batteryHtml}
+          </div>
+        `,
+        iconSize: [size, size],
+        iconAnchor: [size/2, size/2]
       });
     }
     return markerIconCache.current[key];
@@ -436,7 +526,11 @@ export default function ClientDashboard() {
               role: p.role,
               lat: 0,
               lng: 0,
-              isOnline: false
+              isOnline: false,
+              tracking_enabled: p.tracking_enabled !== false,
+              tracking_expires_at: p.tracking_expires_at,
+              battery_level: p.battery_level !== undefined ? p.battery_level : 100,
+              battery_charging: p.battery_charging === true
             };
           }
         });
@@ -451,7 +545,7 @@ export default function ClientDashboard() {
             if (membersMap[l.user_id]) {
               membersMap[l.user_id].lat = l.latitude;
               membersMap[l.user_id].lng = l.longitude;
-              membersMap[l.user_id].isOnline = (Date.now() - new Date(l.updated_at).getTime() < 60000);
+              membersMap[l.user_id].isOnline = (Date.now() - new Date(l.updated_at).getTime() < 360000);
             }
           });
         }
@@ -560,11 +654,41 @@ export default function ClientDashboard() {
       })
       .subscribe();
 
+    // Subscribe to Profiles updates for family members
+    const profilesSub = supabase
+      .channel(`profiles-${familyId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'profiles' },
+        (payload: any) => {
+          if (payload.new && payload.new.family_id === familyId && payload.new.id !== userId) {
+            const row = payload.new;
+            setFamilyMembers(prev => {
+              const updated = { ...prev };
+              if (updated[row.id]) {
+                updated[row.id] = {
+                  ...updated[row.id],
+                  name: row.name,
+                  avatar: row.avatar,
+                  tracking_enabled: row.tracking_enabled !== false,
+                  tracking_expires_at: row.tracking_expires_at,
+                  battery_level: row.battery_level !== undefined ? row.battery_level : 100,
+                  battery_charging: row.battery_charging === true
+                };
+              }
+              return updated;
+            });
+          }
+        }
+      )
+      .subscribe();
+
     return () => {
       alertsSub.unsubscribe();
       locationsSub.unsubscribe();
       messagesSub.unsubscribe();
       broadcastChannel.unsubscribe();
+      profilesSub.unsubscribe();
     };
   }, [familyId, userId, addMessage, checkUpdates]);
 
@@ -575,12 +699,13 @@ export default function ClientDashboard() {
     const fetchInitialTracking = async () => {
       const { data, error } = await supabase
         .from('profiles')
-        .select('tracking_enabled')
+        .select('tracking_enabled, tracking_expires_at')
         .eq('id', userId)
         .maybeSingle();
       
       if (!error && data) {
         setTrackingEnabled(data.tracking_enabled !== false);
+        trackingExpiresAtRef.current = data.tracking_expires_at || null;
       }
     };
 
@@ -592,8 +717,13 @@ export default function ClientDashboard() {
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${userId}` },
         (payload: any) => {
-          if (payload.new && payload.new.tracking_enabled !== undefined) {
-            setTrackingEnabled(payload.new.tracking_enabled !== false);
+          if (payload.new) {
+            if (payload.new.tracking_enabled !== undefined) {
+              setTrackingEnabled(payload.new.tracking_enabled !== false);
+            }
+            if (payload.new.tracking_expires_at !== undefined) {
+              trackingExpiresAtRef.current = payload.new.tracking_expires_at || null;
+            }
           }
         }
       )
@@ -604,17 +734,61 @@ export default function ClientDashboard() {
     };
   }, [userId]);
 
+  // Timer check for tracking expiration
+  useEffect(() => {
+    if (!userId) return;
+    const interval = setInterval(async () => {
+      if (trackingEnabled && trackingExpiresAtRef.current) {
+        const expiryTime = new Date(trackingExpiresAtRef.current).getTime();
+        if (expiryTime < Date.now()) {
+          setTrackingEnabled(false);
+          trackingExpiresAtRef.current = null;
+          await supabase
+            .from('profiles')
+            .update({ tracking_enabled: false, tracking_expires_at: null })
+            .eq('id', userId);
+          showToast("🔋 Rastreo continuo finalizado (Ahorro de batería)");
+        }
+      }
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [userId, trackingEnabled]);
+
   // 2. Geolocation Watcher
   useEffect(() => {
-    if (!userId || !familyId || !trackingEnabled) {
-      // If tracking is disabled, clean up location
-      setMyLocation(null);
-      return;
-    }
+    if (!userId || !familyId) return;
 
+    const isHighAccuracyNeeded = trackingEnabled || isSOSActive || !!(accompaniedExpiresAt && accompaniedExpiresAt > Date.now());
     let active = true;
     let watchId: string | null = null;
-    
+    let sleepIntervalId: ReturnType<typeof setInterval> | null = null;
+
+    const uploadLocation = async (latitude: number, longitude: number) => {
+      if (!active) return;
+      const coords: [number, number] = [latitude, longitude];
+      setMyLocation(coords);
+
+      // Update coordinates in Supabase Realtime table
+      await supabase.from('locations').upsert({
+        user_id: userId,
+        family_id: familyId,
+        latitude: latitude,
+        longitude: longitude,
+        updated_at: new Date().toISOString()
+      });
+
+      // Record to 30-day history logs
+      await supabase.from('locations_history').insert({
+        user_id: userId,
+        family_id: familyId,
+        latitude: latitude,
+        longitude: longitude
+      });
+
+      // Sync battery details on every location upload
+      await updateBatteryStatus();
+    };
+
     const startTracking = async () => {
       try {
         let perm = { location: 'granted' };
@@ -630,51 +804,52 @@ export default function ClientDashboard() {
         }
         setGpsError(null);
 
-        watchId = await Geolocation.watchPosition(
-          { enableHighAccuracy: true, timeout: 10000 },
-          (position) => {
-            if (position && active) {
-              const coords: [number, number] = [position.coords.latitude, position.coords.longitude];
-              setMyLocation(coords);
-
-              // Update coordinates in Supabase Realtime table
-              supabase.from('locations').upsert({
-                user_id: userId,
-                family_id: familyId,
-                latitude: position.coords.latitude,
-                longitude: position.coords.longitude,
-                updated_at: new Date().toISOString()
-              }).then(({ error }) => {
-                if (error && active) console.error("Error upserting location:", error);
-              });
-
-              // Record to 30-day history logs
-              supabase.from('locations_history').insert({
-                user_id: userId,
-                family_id: familyId,
-                latitude: position.coords.latitude,
-                longitude: position.coords.longitude
-              }).then(({ error }) => {
-                if (error && active) console.error("Error writing locations_history:", error);
-              });
+        if (isHighAccuracyNeeded) {
+          // HIGH ACCURACY (Watch mode)
+          watchId = await Geolocation.watchPosition(
+            { enableHighAccuracy: true, timeout: 15000 },
+            (position) => {
+              if (position && active) {
+                uploadLocation(position.coords.latitude, position.coords.longitude);
+              }
             }
-          }
-        );
-        if (!active && watchId) {
-          Geolocation.clearWatch({ id: watchId });
+          );
+        } else {
+          // BATTERY SAVING (5-minute cycle)
+          const fetchSingleLocation = async () => {
+            try {
+              const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000 });
+              if (pos && active) {
+                uploadLocation(pos.coords.latitude, pos.coords.longitude);
+              }
+            } catch (e) {
+              console.warn("Could not get background GPS position:", e);
+            }
+          };
+
+          // Run immediately on entering sleep mode so parent has a fresh pin
+          fetchSingleLocation();
+
+          // Set up 5-minute timer (300,000 ms)
+          sleepIntervalId = setInterval(fetchSingleLocation, 300000);
         }
       } catch (e) {
         if (active) console.error('Error starting location watcher', e);
       }
     };
-    
+
     startTracking();
-    
+
     return () => {
       active = false;
-      if (watchId) Geolocation.clearWatch({ id: watchId });
+      if (watchId) {
+        Geolocation.clearWatch({ id: watchId });
+      }
+      if (sleepIntervalId) {
+        clearInterval(sleepIntervalId);
+      }
     };
-  }, [userId, familyId, trackingEnabled]);
+  }, [userId, familyId, trackingEnabled, isSOSActive, accompaniedExpiresAt, updateBatteryStatus]);
 
   // Reactive Map Centering
   useEffect(() => {
@@ -971,9 +1146,13 @@ export default function ClientDashboard() {
 
   const toggleTracking = async () => {
     const newStatus = !trackingEnabled;
+    if (!newStatus) {
+      showToast("🔒 El rastreo continuo solo puede ser suspendido por el tutor.");
+      return;
+    }
     setTrackingEnabled(newStatus);
     if (userId) {
-      await supabase.from('profiles').update({ tracking_enabled: newStatus }).eq('id', userId);
+      await supabase.from('profiles').update({ tracking_enabled: newStatus, tracking_expires_at: null }).eq('id', userId);
     }
   };
 
@@ -1233,11 +1412,15 @@ export default function ClientDashboard() {
 
         {Object.entries(familyMembers).map(([id, member]) => {
           if (member.lat === 0 && member.lng === 0) return null;
+          const trackingActive = member.tracking_enabled !== false;
+          const battery = member.battery_level !== undefined ? member.battery_level : 100;
+          const charging = member.battery_charging === true;
+
           return (
             <Marker 
               key={id} 
               position={[member.lat, member.lng]} 
-              icon={getAvatarIcon(id, member.avatar, member.isOnline, member.role === 'monitor')}
+              icon={getAvatarIcon(id, member.avatar, member.isOnline, member.role === 'monitor', false, trackingActive, battery, charging, member.name)}
               eventHandlers={{
                 click: () => {
                   setTrackingTargetId(id);
@@ -1261,40 +1444,69 @@ export default function ClientDashboard() {
 
       {/* Floating Avatars Tracking panel */}
       <div className="map-avatars-container">
-        <button 
-          className={`map-avatar-btn ${trackingTargetId === 'me' ? 'active' : ''}`}
-          onClick={() => {
-            setTrackingTargetId('me');
-            if (myLocation) setMapCenterTarget(myLocation);
-          }}
-          title="Centrar en mí"
-        >
-          {avatarBase64 ? (
-            <img src={avatarBase64} alt="Yo" />
-          ) : (
-            <div className="map-avatar-placeholder">{(userName || '?').charAt(0).toUpperCase()}</div>
-          )}
-        </button>
-
-        {Object.entries(familyMembers).map(([id, member]) => (
-          <button
-            key={id}
-            className={`map-avatar-btn ${trackingTargetId === id ? 'active' : ''} ${member.role === 'monitor' ? 'monitor' : ''}`}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+          <button 
+            className={`map-avatar-btn ${trackingTargetId === 'me' ? 'active' : ''} ${trackingEnabled ? 'tracking-active' : 'tracking-inactive'}`}
             onClick={() => {
-              setTrackingTargetId(id);
-              if (member.lat !== 0 && member.lng !== 0) {
-                setMapCenterTarget([member.lat, member.lng]);
-              }
+              setTrackingTargetId('me');
+              if (myLocation) setMapCenterTarget(myLocation);
             }}
-            title={`Seguir a ${member.name}`}
+            title="Centrar en mí"
           >
-            {member.avatar ? (
-              <img src={member.avatar} alt={member.name} style={{ opacity: member.isOnline ? 1 : 0.5 }} />
+            {avatarBase64 ? (
+              <img src={avatarBase64} alt="Yo" />
             ) : (
-              <div className="map-avatar-placeholder" style={{ opacity: member.isOnline ? 1 : 0.5 }}>{(member.name || '?').charAt(0).toUpperCase()}</div>
+              <div className="map-avatar-placeholder">{(userName || '?').charAt(0).toUpperCase()}</div>
             )}
           </button>
-        ))}
+          <span style={{
+            fontSize: '11px',
+            fontWeight: 'bold',
+            color: myBatteryLevel >= 20 ? '#4ade80' : '#fca5a5',
+            textShadow: '1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 2px 4px rgba(0,0,0,0.8)',
+            marginTop: '-2px'
+          }}>
+            {myBatteryLevel}%{myBatteryCharging ? '⚡' : ''}
+          </span>
+        </div>
+
+        {Object.entries(familyMembers).map(([id, member]) => {
+          const isTrackingActive = member.tracking_enabled !== false;
+          const battery = member.battery_level !== undefined ? member.battery_level : 100;
+          const charging = member.battery_charging === true;
+
+          return (
+            <div key={id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+              <button
+                className={`map-avatar-btn ${trackingTargetId === id ? 'active' : ''} ${member.role === 'monitor' ? 'monitor' : ''} ${isTrackingActive ? 'tracking-active' : 'tracking-inactive'}`}
+                onClick={() => {
+                  setTrackingTargetId(id);
+                  if (member.lat !== 0 && member.lng !== 0) {
+                    setMapCenterTarget([member.lat, member.lng]);
+                  }
+                }}
+                title={`Seguir a ${member.name}`}
+              >
+                {member.avatar ? (
+                  <img src={member.avatar} alt={member.name} style={{ opacity: member.isOnline ? 1 : 0.5 }} />
+                ) : (
+                  <div className="map-avatar-placeholder" style={{ opacity: member.isOnline ? 1 : 0.5 }}>{(member.name || '?').charAt(0).toUpperCase()}</div>
+                )}
+              </button>
+              {member.role === 'client' && (
+                <span style={{
+                  fontSize: '11px',
+                  fontWeight: 'bold',
+                  color: battery >= 20 ? '#4ade80' : '#fca5a5',
+                  textShadow: '1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 2px 4px rgba(0,0,0,0.8)',
+                  marginTop: '-2px'
+                }}>
+                  {battery}%{charging ? '⚡' : ''}
+                </span>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {/* Alerta de Alarma Remota del Padre */}

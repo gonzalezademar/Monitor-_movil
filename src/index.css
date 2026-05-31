@@ -549,6 +549,16 @@ body {
   color: white;
 }
 
+/* Custom map marker battery labels & auras */
+.map-avatar-btn.tracking-active {
+  border-color: #4ade80 !important;
+  box-shadow: 0 0 12px #4ade80, 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+}
+.map-avatar-btn.tracking-inactive {
+  border-color: #ef4444 !important;
+  box-shadow: 0 0 12px #ef4444, 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+}
+
 /* Logo del desarrollador con aura de resplandor */
 .dev-brand-logo {
   height: auto;

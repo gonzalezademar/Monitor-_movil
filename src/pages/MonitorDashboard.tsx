@@ -144,39 +144,69 @@ export default function MonitorDashboard() {
   };
 
   const [myLocation, setMyLocation] = useState<[number, number] | null>(null);
-  const [clients, setClients] = useState<Record<string, { lat: number; lng: number; name: string, lastSeen: number, isOnline: boolean, avatar: string | null, role: 'monitor' | 'client', tracking_enabled?: boolean }>>({});
+  const [clients, setClients] = useState<Record<string, { 
+    lat: number; 
+    lng: number; 
+    name: string; 
+    lastSeen: number; 
+    isOnline: boolean; 
+    avatar: string | null; 
+    role: 'monitor' | 'client'; 
+    tracking_enabled?: boolean;
+    tracking_expires_at?: string | null;
+    battery_level?: number;
+    battery_charging?: boolean;
+  }>>({});
   const [alarmActive, setAlarmActive] = useState<{ active: boolean; originName: string }>({ active: false, originName: '' });
   const [mapCenterTarget, setMapCenterTarget] = useState<[number, number] | null>(null);
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [mapTheme, setMapTheme] = useState<'dark' | 'light'>('dark');
   const [isSirenOn, setIsSirenOn] = useState(false);
   const [trackingTargetId, setTrackingTargetId] = useState<string>('me');
+  const [expandedTrackingMenuId, setExpandedTrackingMenuId] = useState<string | null>(null);
 
-  const toggleClientTracking = async (clientId: string, currentStatus: boolean) => {
+  const getRemainingTimeText = (expiresAt: string | null | undefined) => {
+    if (!expiresAt) return 'Manual';
+    const diffMs = new Date(expiresAt).getTime() - Date.now();
+    if (diffMs <= 0) return 'Expirado';
+    const diffMins = Math.ceil(diffMs / 60000);
+    if (diffMins > 60) {
+      const hours = Math.floor(diffMins / 60);
+      const mins = diffMins % 60;
+      return `${hours}h ${mins}m`;
+    }
+    return `${diffMins}m`;
+  };
+
+  const handleToggleTrackingWithExpiry = async (clientId: string, trackingActive: boolean, expiresAt: string | null) => {
     setClients(prev => {
       const updated = { ...prev };
       if (updated[clientId]) {
         updated[clientId] = {
           ...updated[clientId],
-          tracking_enabled: !currentStatus
+          tracking_enabled: trackingActive,
+          tracking_expires_at: expiresAt
         };
       }
       return updated;
     });
 
-    const { error } = await updateTrackingStatus(clientId, !currentStatus);
+    const { error } = await updateTrackingStatus(clientId, trackingActive, expiresAt);
     if (error) {
       setClients(prev => {
         const updated = { ...prev };
         if (updated[clientId]) {
           updated[clientId] = {
             ...updated[clientId],
-            tracking_enabled: currentStatus
+            tracking_enabled: !trackingActive,
+            tracking_expires_at: undefined
           };
         }
         return updated;
       });
-      alert("Error al actualizar estado de rastreo: " + error);
+      showToast("❌ Error: " + error);
+    } else {
+      showToast(trackingActive ? "🟢 Rastreo continuo activado" : "🔴 Rastreo suspendido (Ahorro de batería)");
     }
   };
 
@@ -197,20 +227,53 @@ export default function MonitorDashboard() {
   const [accompaniedClients, setAccompaniedClients] = useState<Record<string, number>>({});
 
   const markerIconCache = useRef<Record<string, L.DivIcon>>({});
-  const getAvatarIcon = useCallback((id: string, avatar: string | null, isOnline: boolean, isMonitor: boolean, isAccompanied?: boolean) => {
+  const getAvatarIcon = useCallback((
+    id: string, 
+    avatar: string | null, 
+    isOnline: boolean, 
+    isMonitor: boolean, 
+    isAccompanied?: boolean,
+    trackingActive?: boolean,
+    batteryLevel?: number,
+    batteryCharging?: boolean,
+    name?: string
+  ) => {
     const avatarKey = avatar ? `avatar_len_${avatar.length}` : 'no_avatar';
-    const cacheKey = `${id}_${isOnline ? 'on' : 'off'}_${avatarKey}_${isMonitor ? 'monitor' : 'client'}_${isAccompanied ? 'acc' : 'no_acc'}`;
+    const trackingKey = trackingActive ? 'act' : 'inact';
+    const batteryKey = batteryLevel !== undefined ? `bat_${batteryLevel}` : 'no_bat';
+    const chargingKey = batteryCharging ? 'chg' : 'no_chg';
+    const cacheKey = `${id}_${isOnline ? 'on' : 'off'}_${avatarKey}_${isMonitor ? 'monitor' : 'client'}_${isAccompanied ? 'acc' : 'no_acc'}_${trackingKey}_${batteryKey}_${chargingKey}`;
+    
     if (!markerIconCache.current[cacheKey]) {
       const size = isMonitor ? 36 : 40;
-      let color = isMonitor ? '#c084fc' : (isOnline ? '#4ade80' : '#9ca3af');
-      if (isAccompanied) {
+      let color = '#ef4444'; // Inactive client by default (red border)
+      if (isMonitor) {
+        color = '#c084fc';
+      } else if (isAccompanied) {
         color = '#ec4899';
+      } else if (trackingActive) {
+        color = '#4ade80';
       }
+      
+      const initial = (name || '?').charAt(0).toUpperCase();
+      const batteryColor = (batteryLevel !== undefined && batteryLevel < 20) ? '#fca5a5' : '#4ade80';
+      const batteryHtml = (!isMonitor && batteryLevel !== undefined)
+        ? `<span style="position:absolute;bottom:-18px;font-size:11px;font-weight:bold;color:${batteryColor};text-shadow:1px 1px 0 #000,-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,0 2px 4px rgba(0,0,0,0.8);white-space:nowrap;z-index:999;">${batteryLevel}%${batteryCharging ? '⚡' : ''}</span>`
+        : '';
+
       markerIconCache.current[cacheKey] = L.divIcon({
         className: `custom-avatar-marker ${isAccompanied ? 'accompanied-glow' : ''}`,
-        html: avatar 
-          ? `<div style="width:${size}px;height:${size}px;border-radius:50%;overflow:hidden;border:3px solid ${color};box-shadow:0 0 10px ${color};"><img src="${avatar}" style="width:100%;height:100%;object-fit:cover;" /></div>` 
-          : `<div style="width:${size}px;height:${size}px;background:${color};border-radius:50%;border:2px solid white;"></div>`,
+        html: `
+          <div style="position:relative;width:${size}px;height:${size}px;display:flex;justify-content:center;align-items:center;">
+            <div style="width:${size}px;height:${size}px;border-radius:50%;overflow:hidden;border:3px solid ${color};box-shadow:0 0 10px ${color};background:#15102a;display:flex;align-items:center;justify-content:center;">
+              ${avatar 
+                ? `<img src="${avatar}" style="width:100%;height:100%;object-fit:cover;" />` 
+                : `<span style="font-weight:bold;color:white;font-size:16px;">${initial}</span>`
+              }
+            </div>
+            ${batteryHtml}
+          </div>
+        `,
         iconSize: [size, size],
         iconAnchor: [size/2, size/2]
       });
@@ -452,7 +515,10 @@ export default function MonitorDashboard() {
               lng: 0,
               isOnline: false,
               lastSeen: Date.now(),
-              tracking_enabled: p.tracking_enabled !== false
+              tracking_enabled: p.tracking_enabled !== false,
+              tracking_expires_at: p.tracking_expires_at,
+              battery_level: p.battery_level !== undefined ? p.battery_level : 100,
+              battery_charging: p.battery_charging === true
             };
           }
         });
@@ -467,7 +533,7 @@ export default function MonitorDashboard() {
             if (membersMap[l.user_id]) {
               membersMap[l.user_id].lat = l.latitude;
               membersMap[l.user_id].lng = l.longitude;
-              membersMap[l.user_id].isOnline = (Date.now() - new Date(l.updated_at).getTime() < 60000);
+              membersMap[l.user_id].isOnline = (Date.now() - new Date(l.updated_at).getTime() < 360000);
             }
           });
         }
@@ -571,7 +637,10 @@ export default function MonitorDashboard() {
                   ...updated[row.id],
                   name: row.name,
                   avatar: row.avatar,
-                  tracking_enabled: row.tracking_enabled !== false
+                  tracking_enabled: row.tracking_enabled !== false,
+                  tracking_expires_at: row.tracking_expires_at,
+                  battery_level: row.battery_level !== undefined ? row.battery_level : 100,
+                  battery_charging: row.battery_charging === true
                 };
               }
               return updated;
@@ -770,7 +839,7 @@ export default function MonitorDashboard() {
         const updated = { ...prev };
         let changed = false;
         for (let id in updated) {
-          if (updated[id].isOnline && (now - updated[id].lastSeen > 60000)) {
+          if (updated[id].isOnline && (now - updated[id].lastSeen > 360000)) {
             updated[id].isOnline = false;
             changed = true;
           }
@@ -1249,12 +1318,15 @@ export default function MonitorDashboard() {
         {Object.entries(clients).map(([id, client]) => {
           if (client.lat === 0 && client.lng === 0) return null;
           const isAccompanied = !!(accompaniedClients[id] && (accompaniedClients[id] > Date.now()));
+          const trackingActive = client.tracking_enabled !== false;
+          const battery = client.battery_level !== undefined ? client.battery_level : 100;
+          const charging = client.battery_charging === true;
           return (
             <React.Fragment key={id}>
               <Marker 
                 key={id}
                 position={[client.lat, client.lng]} 
-                icon={getAvatarIcon(id, client.avatar, client.isOnline, client.role === 'monitor', isAccompanied)}
+                icon={getAvatarIcon(id, client.avatar, client.isOnline, client.role === 'monitor', isAccompanied, trackingActive, battery, charging, client.name)}
                 eventHandlers={{
                   click: () => {
                     setTrackingTargetId(id);
@@ -1319,42 +1391,65 @@ export default function MonitorDashboard() {
 
       {/* Symmetrical Avatars Panel for fast focus */}
       <div className="map-avatars-container">
-        <button 
-          className={`map-avatar-btn ${trackingTargetId === 'me' ? 'active' : ''}`}
-          onClick={() => {
-            setTrackingTargetId('me');
-            setIsAutoCentering(true);
-            if (myLocation) setMapCenterTarget(myLocation);
-          }}
-          title="Centrar en mí"
-        >
-          {avatarBase64 ? (
-            <img src={avatarBase64} alt="Yo" />
-          ) : (
-            <div className="map-avatar-placeholder">{(userName || '?').charAt(0).toUpperCase()}</div>
-          )}
-        </button>
-
-        {Object.entries(clients).map(([id, client]) => (
-          <button
-            key={id}
-            className={`map-avatar-btn ${trackingTargetId === id ? 'active' : ''} ${client.role === 'monitor' ? 'monitor' : ''}`}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+          <button 
+            className={`map-avatar-btn ${trackingTargetId === 'me' ? 'active' : ''}`}
             onClick={() => {
-              setTrackingTargetId(id);
+              setTrackingTargetId('me');
               setIsAutoCentering(true);
-              if (client.lat !== 0 && client.lng !== 0) {
-                setMapCenterTarget([client.lat, client.lng]);
-              }
+              if (myLocation) setMapCenterTarget(myLocation);
             }}
-            title={`Seguir a ${client.name}`}
+            title="Centrar en mí"
+            style={{
+              borderColor: '#4ade80',
+              boxShadow: '0 0 10px rgba(74, 222, 128, 0.5)'
+            }}
           >
-            {client.avatar ? (
-              <img src={client.avatar} alt={client.name} style={{ opacity: client.isOnline ? 1 : 0.5 }} />
+            {avatarBase64 ? (
+              <img src={avatarBase64} alt="Yo" />
             ) : (
-              <div className="map-avatar-placeholder" style={{ opacity: client.isOnline ? 1 : 0.5 }}>{(client.name || '?').charAt(0).toUpperCase()}</div>
+              <div className="map-avatar-placeholder">{(userName || '?').charAt(0).toUpperCase()}</div>
             )}
           </button>
-        ))}
+        </div>
+
+        {Object.entries(clients).map(([id, client]) => {
+          const isTrackingActive = client.tracking_enabled !== false;
+          const battery = client.battery_level !== undefined ? client.battery_level : 100;
+          const charging = client.battery_charging === true;
+          return (
+            <div key={id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+              <button
+                className={`map-avatar-btn ${trackingTargetId === id ? 'active' : ''} ${client.role === 'monitor' ? 'monitor' : ''} ${isTrackingActive ? 'tracking-active' : 'tracking-inactive'}`}
+                onClick={() => {
+                  setTrackingTargetId(id);
+                  setIsAutoCentering(true);
+                  if (client.lat !== 0 && client.lng !== 0) {
+                    setMapCenterTarget([client.lat, client.lng]);
+                  }
+                }}
+                title={`Seguir a ${client.name}`}
+              >
+                {client.avatar ? (
+                  <img src={client.avatar} alt={client.name} style={{ opacity: client.isOnline ? 1 : 0.5 }} />
+                ) : (
+                  <div className="map-avatar-placeholder" style={{ opacity: client.isOnline ? 1 : 0.5 }}>{(client.name || '?').charAt(0).toUpperCase()}</div>
+                )}
+              </button>
+              {client.role === 'client' && (
+                <span style={{
+                  fontSize: '11px',
+                  fontWeight: 'bold',
+                  color: battery >= 20 ? '#4ade80' : '#fca5a5',
+                  textShadow: '1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 2px 4px rgba(0,0,0,0.8)',
+                  marginTop: '-2px'
+                }}>
+                  {battery}%{charging ? '⚡' : ''}
+                </span>
+              )}
+            </div>
+          );
+        })}
       </div>
 
 
@@ -1455,43 +1550,100 @@ export default function MonitorDashboard() {
                     )}
                     <div style={{ flex: 1, textAlign: 'left' }}>
                       <span style={{ fontSize: '14px', fontWeight: 'bold', display: 'block' }}>{c.name}</span>
-                      <span style={{ fontSize: '11px', opacity: 0.6 }}>{c.isOnline ? 'En línea (Nube)' : 'Desconectado'}</span>
+                      <span style={{ fontSize: '11px', opacity: 0.6 }}>
+                        {c.isOnline ? 'En línea (Nube)' : 'Desconectado'}
+                        {c.role === 'client' && ` • 🔋 ${c.battery_level !== undefined ? c.battery_level : 100}%${c.battery_charging ? '⚡' : ''}`}
+                      </span>
                     </div>
                     <div className={c.isOnline ? 'led-green' : 'led-red'} style={{ width: '8px', height: '8px', borderRadius: '50%' }}></div>
                   </div>
                   
-                  {/* Remote tracking / battery toggle */}
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
-                    <button 
-                      onClick={() => toggleClientTracking(id, c.tracking_enabled !== false)}
-                      className="glass-btn secondary"
-                      style={{ 
-                        fontSize: '11px', 
-                        padding: '6px 10px', 
-                        flex: 1, 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        justifyContent: 'center', 
-                        gap: '4px',
-                        background: c.tracking_enabled !== false ? 'rgba(74, 222, 128, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                        borderColor: c.tracking_enabled !== false ? 'rgba(74, 222, 128, 0.3)' : 'rgba(239, 68, 68, 0.3)',
-                        color: c.tracking_enabled !== false ? '#4ade80' : '#fca5a5'
-                      }}
-                      title={c.tracking_enabled !== false ? "Pausar rastreo GPS del hijo remotely (Ahorrar batería)" : "Re-activar rastreo GPS del hijo"}
-                    >
-                      {c.tracking_enabled !== false ? <Zap size={11} className="animate-pulse" /> : <Battery size={11} />}
-                      {c.tracking_enabled !== false ? 'GPS: Activo' : 'GPS: Suspendido'}
-                    </button>
-                    <button 
-                      onClick={() => {
-                        setSelectedChildForHistory({ id, name: c.name });
-                        setIsHistoryModalOpen(true);
-                      }}
-                      className="glass-btn secondary"
-                      style={{ fontSize: '11px', padding: '6px 10px', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
-                    >
-                      <Clock size={12} /> Ver Ruta
-                    </button>
+                  {/* Remote tracking / battery toggle (2-tap workflow) */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
+                    {expandedTrackingMenuId === id ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', background: 'rgba(0,0,0,0.2)', padding: '8px', borderRadius: '12px' }}>
+                        <span style={{ fontSize: '11px', opacity: 0.8, textAlign: 'left', fontWeight: 'bold', color: '#a78bfa' }}>⏰ Establecer límite de rastreo:</span>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                          {[
+                            { label: '30m', mins: 30 },
+                            { label: '1h', mins: 60 },
+                            { label: '2h', mins: 120 },
+                            { label: '4h', mins: 240 },
+                            { label: 'Manual', mins: null }
+                          ].map((opt) => (
+                            <button
+                              key={opt.label}
+                              type="button"
+                              onClick={async () => {
+                                const expiresAt = opt.mins 
+                                  ? new Date(Date.now() + opt.mins * 60000).toISOString() 
+                                  : null;
+                                setExpandedTrackingMenuId(null);
+                                await handleToggleTrackingWithExpiry(id, true, expiresAt);
+                              }}
+                              className="glass-btn secondary"
+                              style={{ fontSize: '10px', padding: '6px', flex: '1 0 30%', background: 'rgba(255,255,255,0.05)' }}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setExpandedTrackingMenuId(null)}
+                          className="glass-btn secondary"
+                          style={{ fontSize: '10px', padding: '4px', marginTop: '4px', borderColor: 'rgba(255,255,255,0.1)' }}
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button 
+                          onClick={() => {
+                            const isActive = c.tracking_enabled !== false;
+                            if (isActive) {
+                              // Direct toggle off in 1 tap
+                              handleToggleTrackingWithExpiry(id, false, null);
+                            } else {
+                              // Open duration selector
+                              setExpandedTrackingMenuId(id);
+                            }
+                          }}
+                          className="glass-btn secondary"
+                          style={{ 
+                            fontSize: '11px', 
+                            padding: '6px 10px', 
+                            flex: 1, 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            justifyContent: 'center', 
+                            gap: '4px',
+                            background: c.tracking_enabled !== false ? 'rgba(74, 222, 128, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                            borderColor: c.tracking_enabled !== false ? 'rgba(74, 222, 128, 0.3)' : 'rgba(239, 68, 68, 0.3)',
+                            color: c.tracking_enabled !== false ? '#4ade80' : '#fca5a5'
+                          }}
+                          title={c.tracking_enabled !== false ? "Pausar rastreo GPS remotely (Ahorrar batería)" : "Establecer duración del rastreo GPS"}
+                        >
+                          {c.tracking_enabled !== false ? <Zap size={11} className="animate-pulse" /> : <Battery size={11} />}
+                          <span>
+                            {c.tracking_enabled !== false 
+                              ? `GPS: Activo (${getRemainingTimeText(c.tracking_expires_at)})` 
+                              : 'GPS: Suspendido'}
+                          </span>
+                        </button>
+                        <button 
+                          onClick={() => {
+                            setSelectedChildForHistory({ id, name: c.name });
+                            setIsHistoryModalOpen(true);
+                          }}
+                          className="glass-btn secondary"
+                          style={{ fontSize: '11px', padding: '6px 10px', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
+                        >
+                          <Clock size={12} /> Ver Ruta
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
