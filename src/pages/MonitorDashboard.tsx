@@ -469,11 +469,14 @@ export default function MonitorDashboard() {
     requestAllPermissions();
   }, []);
 
+  // Check updates once on load
+  useEffect(() => {
+    checkUpdates();
+  }, [checkUpdates]);
+
   // 1. Fetch details & Realtime Subscriptions
   useEffect(() => {
     if (!familyId || !userId) return;
-
-    checkUpdates();
 
     // Fetch initial chat
     const fetchChatMessages = async () => {

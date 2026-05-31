@@ -482,11 +482,14 @@ export default function ClientDashboard() {
     setIsRemoteAlarmActive(false);
   };
 
+  // Check updates once on load
+  useEffect(() => {
+    checkUpdates();
+  }, [checkUpdates]);
+
   // 1. Initial Sync and Realtime subscriptions
   useEffect(() => {
     if (!familyId || !userId) return;
-
-    checkUpdates();
 
     // Fetch initial chat history
     const fetchChatMessages = async () => {
