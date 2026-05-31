@@ -80,6 +80,15 @@ export default function ClientDashboard() {
   const [ghostModeActive, setGhostModeActive] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
+  // Emergency Lock Panel States
+  const [isEmergencyScreenOpen, setIsEmergencyScreenOpen] = useState(false);
+  const [sosType, setSosType] = useState<'silent' | 'loud' | null>(null);
+  const [leftProgress, setLeftProgress] = useState(0);
+  const [rightProgress, setRightProgress] = useState(0);
+
+  const leftSosIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const rightSosIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Scanning / Linking State (for unlinked clients)
   const [manualCodeInput, setManualCodeInput] = useState('');
   const [formError, setFormError] = useState('');
@@ -1066,6 +1075,91 @@ export default function ClientDashboard() {
     setSosProgress(0);
   };
 
+  // Left SOS (Silent) Press handlers
+  const handleLeftPressStart = (e?: React.MouseEvent | React.TouchEvent) => {
+    if (e && e.type === 'touchstart') e.preventDefault();
+    if (leftSosIntervalRef.current) clearInterval(leftSosIntervalRef.current);
+    setLeftProgress(0);
+    let currentProgress = 0;
+
+    leftSosIntervalRef.current = setInterval(() => {
+      currentProgress += 1;
+      setLeftProgress(currentProgress);
+
+      if (currentProgress % 10 === 0 && currentProgress < 100) {
+        if ('vibrate' in navigator) {
+          navigator.vibrate(40);
+        }
+      }
+
+      if (currentProgress >= 100) {
+        if (leftSosIntervalRef.current) {
+          clearInterval(leftSosIntervalRef.current);
+          leftSosIntervalRef.current = null;
+        }
+        setSosType('silent');
+        setSOSActive(true);
+        setIsEmergencyScreenOpen(false);
+        setLeftProgress(0);
+        if ('vibrate' in navigator) {
+          navigator.vibrate([150, 80, 150]);
+        }
+      }
+    }, 30);
+  };
+
+  const handleLeftPressEnd = (e?: React.MouseEvent | React.TouchEvent) => {
+    if (e && e.type === 'touchend') e.preventDefault();
+    if (leftSosIntervalRef.current) {
+      clearInterval(leftSosIntervalRef.current);
+      leftSosIntervalRef.current = null;
+    }
+    setLeftProgress(0);
+  };
+
+  // Right SOS (Loud) Press handlers
+  const handleRightPressStart = (e?: React.MouseEvent | React.TouchEvent) => {
+    if (e && e.type === 'touchstart') e.preventDefault();
+    if (rightSosIntervalRef.current) clearInterval(rightSosIntervalRef.current);
+    setRightProgress(0);
+    let currentProgress = 0;
+
+    rightSosIntervalRef.current = setInterval(() => {
+      currentProgress += 1;
+      setRightProgress(currentProgress);
+
+      if (currentProgress % 10 === 0 && currentProgress < 100) {
+        if ('vibrate' in navigator) {
+          navigator.vibrate(40);
+        }
+      }
+
+      if (currentProgress >= 100) {
+        if (rightSosIntervalRef.current) {
+          clearInterval(rightSosIntervalRef.current);
+          rightSosIntervalRef.current = null;
+        }
+        setSosType('loud');
+        setSOSActive(true);
+        setIsEmergencyScreenOpen(false);
+        setRightProgress(0);
+        playRemoteAlarm(); // Play local siren sound
+        if ('vibrate' in navigator) {
+          navigator.vibrate([150, 80, 150]);
+        }
+      }
+    }, 30);
+  };
+
+  const handleRightPressEnd = (e?: React.MouseEvent | React.TouchEvent) => {
+    if (e && e.type === 'touchend') e.preventDefault();
+    if (rightSosIntervalRef.current) {
+      clearInterval(rightSosIntervalRef.current);
+      rightSosIntervalRef.current = null;
+    }
+    setRightProgress(0);
+  };
+
   const startCancelSOS = (e?: React.MouseEvent | React.TouchEvent) => {
     if (e && e.type === 'touchstart') {
       e.preventDefault();
@@ -1097,6 +1191,8 @@ export default function ClientDashboard() {
           cancelIntervalRef.current = null;
         }
         setSOSActive(false);
+        setSosType(null); // Reset SOS type
+        stopRemoteAlarm(); // Stop siren sound
         setGhostModeActive(false);
         releaseWakeLock();
         setCancelProgress(0);
@@ -1124,6 +1220,8 @@ export default function ClientDashboard() {
     
     if (tapCountRef.current >= 5) {
       setSOSActive(false);
+      setSosType(null); // Reset SOS type
+      stopRemoteAlarm(); // Stop local alarm sound
       setGhostModeActive(false);
       releaseWakeLock();
       tapCountRef.current = 0;
@@ -1204,6 +1302,8 @@ export default function ClientDashboard() {
       if (cancelTimerRef.current) clearTimeout(cancelTimerRef.current);
       if (cancelIntervalRef.current) clearInterval(cancelIntervalRef.current);
       if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
+      if (leftSosIntervalRef.current) clearInterval(leftSosIntervalRef.current);
+      if (rightSosIntervalRef.current) clearInterval(rightSosIntervalRef.current);
     };
   }, []);
 
@@ -1322,30 +1422,195 @@ export default function ClientDashboard() {
   }
 
   if (isSOSActive) {
+    const isSilent = sosType === 'silent';
     return (
-      <div className="blackout-screen" onClick={handleBlackoutTap} style={{ userSelect: 'none', cursor: 'default', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', paddingBottom: '40px' }}>
-         <button 
-           onMouseDown={startCancelSOS} onMouseUp={stopCancelSOS} onMouseLeave={stopCancelSOS} 
-           onTouchStart={startCancelSOS} onTouchEnd={stopCancelSOS} 
-           style={{ 
-             background: cancelProgress > 0 
-               ? `linear-gradient(90deg, rgba(239, 68, 68, 0.4) ${cancelProgress}%, rgba(255,255,255,0.08) ${cancelProgress}%)` 
-               : 'rgba(255,255,255,0.1)', 
-             border: cancelProgress > 0 ? '1px solid rgba(239, 68, 68, 0.5)' : '1px solid rgba(255,255,255,0.2)', 
-             color: cancelProgress > 0 ? 'white' : 'rgba(255,255,255,0.6)', 
-             padding: '16px 32px', 
-             borderRadius: '24px', 
-             fontSize: '15px', 
-             fontWeight: 'bold',
-             zIndex: 10, 
-             touchAction: 'none',
-             transform: cancelProgress > 0 ? 'scale(1.05)' : 'scale(1)',
-             transition: 'transform 0.1s ease-out, background 0.05s linear',
-             boxShadow: cancelProgress > 0 ? '0 0 20px rgba(239, 68, 68, 0.3)' : 'none'
-           }}
-         >
-           {cancelProgress > 0 ? `Cancelando en ${Math.ceil((100 - cancelProgress) / 33)}s...` : 'Mantener pulsado para cancelar SOS'}
-         </button>
+      <div 
+        className="blackout-screen" 
+        onClick={handleBlackoutTap} 
+        style={{ 
+          userSelect: 'none', 
+          cursor: 'default', 
+          display: 'flex', 
+          flexDirection: 'column', 
+          alignItems: 'center', 
+          justifyContent: 'flex-end', 
+          paddingBottom: '40px',
+          backgroundColor: 'black'
+        }}
+      >
+        {!isSilent && (
+          <>
+            <div style={{ position: 'absolute', top: '25%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', animation: 'pulse 1s infinite' }}>
+              <ShieldAlert size={80} color="#ef4444" />
+              <h1 style={{ fontSize: '28px', fontWeight: '900', color: '#ef4444', textShadow: '0 0 10px rgba(239, 68, 68, 0.5)' }}>SOS ACTIVO (RUIDOSO)</h1>
+              <p style={{ fontSize: '14px', opacity: 0.8, color: '#fca5a5' }}>Sonando alarma y transmitiendo geolocalización</p>
+            </div>
+
+            <button 
+              onMouseDown={startCancelSOS} onMouseUp={stopCancelSOS} onMouseLeave={stopCancelSOS} 
+              onTouchStart={startCancelSOS} onTouchEnd={stopCancelSOS} 
+              style={{ 
+                background: cancelProgress > 0 
+                  ? `linear-gradient(90deg, rgba(239, 68, 68, 0.4) ${cancelProgress}%, rgba(255,255,255,0.08) ${cancelProgress}%)` 
+                  : 'rgba(255,255,255,0.1)', 
+                border: cancelProgress > 0 ? '1px solid rgba(239, 68, 68, 0.5)' : '1px solid rgba(255,255,255,0.2)', 
+                color: cancelProgress > 0 ? 'white' : 'rgba(255,255,255,0.6)', 
+                padding: '16px 32px', 
+                borderRadius: '24px', 
+                fontSize: '15px', 
+                fontWeight: 'bold',
+                zIndex: 10, 
+                touchAction: 'none',
+                transform: cancelProgress > 0 ? 'scale(1.05)' : 'scale(1)',
+                transition: 'transform 0.1s ease-out, background 0.05s linear',
+                boxShadow: cancelProgress > 0 ? '0 0 20px rgba(239, 68, 68, 0.3)' : 'none'
+              }}
+            >
+              {cancelProgress > 0 ? `Cancelando en ${Math.ceil((100 - cancelProgress) / 33)}s...` : 'Mantener pulsado para cancelar SOS'}
+            </button>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  if (isEmergencyScreenOpen) {
+    return (
+      <div 
+        className="blackout-screen"
+        style={{ 
+          userSelect: 'none', 
+          cursor: 'default', 
+          display: 'flex', 
+          flexDirection: 'column', 
+          alignItems: 'center', 
+          justifyContent: 'space-between', 
+          padding: '24px',
+          background: 'radial-gradient(circle at center, #0e0b1f 0%, #030206 100%)',
+          zIndex: 9999
+        }}
+      >
+        {/* Top Header */}
+        <div style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px' }}>
+          <button 
+            onClick={() => setIsEmergencyScreenOpen(false)}
+            style={{ 
+              background: 'rgba(255,255,255,0.05)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              color: 'white',
+              padding: '8px 16px',
+              borderRadius: '20px',
+              fontSize: '13px',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            ← Volver
+          </button>
+          <AgIsotype size={32} />
+          <div style={{ width: '80px' }} /> {/* spacer */}
+        </div>
+
+        {/* Center Instructions */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', textAlign: 'center', padding: '0 20px', flex: 1, justifyContent: 'center' }}>
+          <ShieldAlert size={64} color="#ef4444" className="animate-pulse" style={{ opacity: 0.8 }} />
+          <h2 style={{ fontSize: '20px', fontWeight: 'bold', color: '#f8fafc' }}>PANTALLA DE PREPARACIÓN SOS</h2>
+          <p style={{ fontSize: '13px', color: '#94a3b8', lineHeight: 1.5, maxWidth: '280px' }}>
+            Mantén pulsada una esquina por 3 segundos para activar el protocolo de emergencia.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', color: '#64748b', fontWeight: '500' }}>
+            <span>• Esquina Izquierda: SOS Silencioso (Pantalla apagada)</span>
+            <span>• Esquina Derecha: SOS Ruidoso (Alarma sonora local)</span>
+          </div>
+        </div>
+
+        {/* Bottom Corner Buttons */}
+        <div style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px', position: 'relative', height: '110px' }}>
+          {/* Left Button: Silent SOS */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', position: 'absolute', bottom: '0', left: '0' }}>
+            <div style={{
+              position: 'absolute',
+              width: '100px',
+              height: '100px',
+              borderRadius: '50%',
+              background: `conic-gradient(#a855f7 ${leftProgress}%, rgba(255, 255, 255, 0.05) ${leftProgress}%)`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              top: '-10px',
+              left: '-10px',
+              pointerEvents: 'none',
+              boxShadow: leftProgress > 0 ? '0 0 15px rgba(168, 85, 247, 0.4)' : 'none'
+            }} />
+            <button
+              onMouseDown={handleLeftPressStart} onMouseUp={handleLeftPressEnd} onMouseLeave={handleLeftPressEnd}
+              onTouchStart={handleLeftPressStart} onTouchEnd={handleLeftPressEnd}
+              style={{
+                width: '80px',
+                height: '80px',
+                borderRadius: '50%',
+                background: leftProgress > 0 ? `rgb(${168 - Math.round(leftProgress * 0.8)}, 85, 247)` : '#1e1b4b',
+                border: '2px solid rgba(168, 85, 247, 0.4)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'white',
+                boxShadow: '0 4px 20px rgba(168, 85, 247, 0.3)',
+                cursor: 'pointer',
+                touchAction: 'none',
+                transform: leftProgress > 0 ? `scale(${1 + (leftProgress / 600)})` : 'scale(1)',
+                transition: 'transform 0.05s ease-out'
+              }}
+            >
+              <span style={{ fontSize: '24px' }}>🤫</span>
+            </button>
+            <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#c084fc' }}>SOS Silencioso</span>
+          </div>
+
+          {/* Right Button: Loud SOS */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', position: 'absolute', bottom: '0', right: '0' }}>
+            <div style={{
+              position: 'absolute',
+              width: '100px',
+              height: '100px',
+              borderRadius: '50%',
+              background: `conic-gradient(#ef4444 ${rightProgress}%, rgba(255, 255, 255, 0.05) ${rightProgress}%)`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              top: '-10px',
+              right: '-10px',
+              pointerEvents: 'none',
+              boxShadow: rightProgress > 0 ? '0 0 15px rgba(239, 68, 68, 0.4)' : 'none'
+            }} />
+            <button
+              onMouseDown={handleRightPressStart} onMouseUp={handleRightPressEnd} onMouseLeave={handleRightPressEnd}
+              onTouchStart={handleRightPressStart} onTouchEnd={handleRightPressEnd}
+              style={{
+                width: '80px',
+                height: '80px',
+                borderRadius: '50%',
+                background: rightProgress > 0 ? `rgb(${239 - Math.round(rightProgress * 0.8)}, 68, 68)` : '#7f1d1d',
+                border: '2px solid rgba(239, 68, 68, 0.4)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'white',
+                boxShadow: '0 4px 20px rgba(239, 68, 68, 0.3)',
+                cursor: 'pointer',
+                touchAction: 'none',
+                transform: rightProgress > 0 ? `scale(${1 + (rightProgress / 600)})` : 'scale(1)',
+                transition: 'transform 0.05s ease-out'
+              }}
+            >
+              <span style={{ fontSize: '24px' }}>🚨</span>
+            </button>
+            <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#f87171' }}>SOS Ruidoso</span>
+          </div>
+        </div>
       </div>
     );
   }
@@ -1443,6 +1708,26 @@ export default function ClientDashboard() {
         title="Cambiar tema de mapa"
       >
         {mapTheme === 'dark' ? <Sun size={24} /> : <Moon size={24} />}
+      </button>
+
+      {/* Botón para entrar al Modo de Emergencia */}
+      <button 
+        className="map-theme-btn"
+        onClick={() => setIsEmergencyScreenOpen(true)}
+        style={{ 
+          top: '144px',
+          background: 'rgba(239, 68, 68, 0.15)',
+          border: '1.5px solid #ef4444',
+          color: '#f87171',
+          boxShadow: '0 0 12px rgba(239, 68, 68, 0.3)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          animation: 'pulse 2s infinite'
+        }}
+        title="Abrir Pantalla de Emergencia SOS"
+      >
+        <ShieldAlert size={22} />
       </button>
 
       {/* Floating Avatars Tracking panel */}
