@@ -982,6 +982,15 @@ export default function MonitorDashboard() {
 
   return (
     <div className="dashboard-container" style={{ position: 'relative', overflow: 'hidden' }}>
+      <header className="app-header">
+        <div className="header-logo-container">
+          <img src={developerLogo} alt="AG Creations" className="header-logo" />
+        </div>
+        <button className="header-menu-btn" onClick={openMenu} title="Abrir Menú">
+          <Menu size={28} color="white" />
+        </button>
+      </header>
+
       {isProgrammingSafeZone && (
         <div style={{ 
           position: 'absolute', 
@@ -1113,13 +1122,13 @@ export default function MonitorDashboard() {
       )}
 
       {gpsError && (
-        <div style={{ position: 'absolute', top: 60, left: 0, right: 0, background: '#ef4444', color: 'white', padding: '12px', textAlign: 'center', zIndex: 9999, fontWeight: 'bold' }}>
+        <div style={{ position: 'absolute', top: 70, left: 0, right: 0, background: '#ef4444', color: 'white', padding: '12px', textAlign: 'center', zIndex: 9999, fontWeight: 'bold' }}>
           {gpsError}
         </div>
       )}
 
       {alarmActive.active && (
-        <div className="alarm-banner" style={{ position: 'absolute', top: '16px', left: '50%', transform: 'translateX(-50%)', zIndex: 9999, background: '#ef4444', padding: '16px 24px', borderRadius: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', boxShadow: '0 8px 32px rgba(239, 68, 68, 0.4)', color: 'white' }}>
+        <div className="alarm-banner" style={{ position: 'absolute', top: '80px', left: '50%', transform: 'translateX(-50%)', zIndex: 9999, background: '#ef4444', padding: '16px 24px', borderRadius: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', boxShadow: '0 8px 32px rgba(239, 68, 68, 0.4)', color: 'white' }}>
           <AlertCircle size={32} style={{ animation: 'bounce 1s infinite' }} />
           <div>
             <h3 style={{ margin: 0, fontSize: '16px' }}>🚨 ¡SOS ACTIVO!</h3>
@@ -1134,13 +1143,13 @@ export default function MonitorDashboard() {
       )}
 
       {Object.entries(accompaniedClients).some(([_, expires]) => expires > Date.now()) && (
-        <div style={{ position: 'absolute', top: alarmActive.active ? '180px' : '16px', left: '50%', transform: 'translateX(-50%)', zIndex: 9998, background: 'rgba(236,72,153,0.95)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '12px 24px', borderRadius: '16px', display: 'flex', alignItems: 'center', gap: '10px', boxShadow: '0 4px 20px rgba(236, 72, 153, 0.4)', fontSize: '13px', fontWeight: 'bold' }}>
+        <div style={{ position: 'absolute', top: alarmActive.active ? '250px' : '80px', left: '50%', transform: 'translateX(-50%)', zIndex: 9998, background: 'rgba(236,72,153,0.95)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '12px 24px', borderRadius: '16px', display: 'flex', alignItems: 'center', gap: '10px', boxShadow: '0 4px 20px rgba(236, 72, 153, 0.4)', fontSize: '13px', fontWeight: 'bold' }}>
           <Clock size={18} className="animate-pulse" />
           <span>Acompañamiento Activo: {Object.entries(accompaniedClients).filter(([_, expires]) => expires > Date.now()).map(([childId]) => clients[childId]?.name || 'Hijo').join(', ')}</span>
         </div>
       )}
 
-      <MapContainer center={myLocation || [-34.6037, -58.3816]} zoom={15} style={{ height: '100dvh', width: '100vw' }} zoomControl={false}>
+      <MapContainer center={myLocation || [-34.6037, -58.3816]} zoom={15} style={{ height: 'calc(100dvh - 70px)', width: '100vw' }} zoomControl={false}>
         {isAutoCentering && mapCenterTarget && (
           <MapAutoCenter target={mapCenterTarget} />
         )}
@@ -1332,14 +1341,7 @@ export default function MonitorDashboard() {
         ))}
       </div>
 
-      {/* Menu floating button */}
-      <button 
-        className="menu-btn" 
-        onClick={openMenu} 
-        style={{ position: 'absolute', top: '16px', left: '16px', zIndex: 1000 }}
-      >
-        <Menu size={24} />
-      </button>
+
 
       {/* Floating action buttons */}
       <div className="tactical-actions" style={{ position: 'absolute', bottom: '16px', right: '16px', zIndex: 1000, display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -1404,10 +1406,7 @@ export default function MonitorDashboard() {
         </div>
       )}
 
-      {/* Logo corporativo flotante en mapa (esquina inferior derecha) */}
-      <div className="floating-brand-logo">
-        <img src={developerLogo} alt="AG Creation" className="dev-brand-logo" style={{ width: '100%' }} />
-      </div>
+
 
       {isMenuOpen && <div className="side-menu-overlay" onClick={() => setIsMenuOpen(false)} />}
       <div className={`side-menu ${isMenuOpen ? 'open' : ''}`}>

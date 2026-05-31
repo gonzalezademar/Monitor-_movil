@@ -221,7 +221,7 @@ body {
 
 .map-theme-btn {
   position: absolute;
-  top: 76px;
+  top: 86px;
   right: 16px;
   background: rgba(30, 27, 75, 0.85);
   backdrop-filter: blur(12px);
@@ -498,7 +498,7 @@ body {
 /* Floating Avatars Panel in Map */
 .map-avatars-container {
   position: absolute;
-  top: 135px;
+  top: 145px;
   right: 16px;
   display: flex;
   flex-direction: column;
@@ -707,6 +707,51 @@ body {
   left: 50%;
   transform: translateX(-50%);
   z-index: 1000;
+}
+
+/* =========================================
+   ESTILOS CABECERA REDISEÑADA (AG Creations)
+   ========================================= */
+.app-header {
+  height: 70px;
+  background: #0b1120; /* Color azul oscuro sólido del ejemplo */
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  z-index: 1010;
+  width: 100%;
+  flex-shrink: 0;
+}
+
+.header-logo-container {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.header-logo {
+  height: 48px; /* Tamaño ideal del logo */
+  width: auto;
+  object-fit: contain;
+  filter: drop-shadow(0 0 4px rgba(37, 99, 235, 0.4)) drop-shadow(0 0 10px rgba(249, 115, 22, 0.3));
+}
+
+.header-menu-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s;
+}
+
+.header-menu-btn:active {
+  transform: scale(0.92);
 }
 
 
