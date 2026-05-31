@@ -730,6 +730,7 @@ body {
   display: flex;
   align-items: center;
   height: 100%;
+  gap: 14px;
 }
 
 .header-logo {
@@ -737,6 +738,37 @@ body {
   width: auto;
   object-fit: contain;
   filter: drop-shadow(0 0 4px rgba(37, 99, 235, 0.4)) drop-shadow(0 0 10px rgba(249, 115, 22, 0.3));
+}
+
+.header-divider {
+  width: 1px;
+  height: 32px;
+  background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.25), transparent);
+}
+
+.header-credits {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  font-family: 'Inter', sans-serif;
+}
+
+.credit-label {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.credit-author {
+  font-size: 13px;
+  color: #fb923c; /* Tono naranja-dorado premium del logo */
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  line-height: 1.2;
+  text-shadow: 0 0 8px rgba(251, 146, 60, 0.3);
 }
 
 .header-menu-btn {

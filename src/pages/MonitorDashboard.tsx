@@ -985,6 +985,11 @@ export default function MonitorDashboard() {
       <header className="app-header">
         <div className="header-logo-container">
           <img src={developerLogo} alt="AG Creations" className="header-logo" />
+          <div className="header-divider" />
+          <div className="header-credits">
+            <span className="credit-label">Desarrollado por</span>
+            <span className="credit-author">Adelio González</span>
+          </div>
         </div>
         <button className="header-menu-btn" onClick={openMenu} title="Abrir Menú">
           <Menu size={28} color="white" />
