@@ -158,6 +158,7 @@ export default function MonitorDashboard() {
     battery_charging?: boolean;
   }>>({});
   const [alarmActive, setAlarmActive] = useState<{ active: boolean; originName: string }>({ active: false, originName: '' });
+  const [sosHistory, setSosHistory] = useState<{ id: string; name: string; timestamp: number }[]>([]);
   const [mapCenterTarget, setMapCenterTarget] = useState<[number, number] | null>(null);
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [mapTheme, setMapTheme] = useState<'dark' | 'light'>('dark');
@@ -465,6 +466,7 @@ export default function MonitorDashboard() {
       oscillatorRef.current = null;
     }
     setAlarmActive({ active: false, originName: '' });
+    setSosHistory([]);
   };
 
   useEffect(() => {
@@ -580,6 +582,14 @@ export default function MonitorDashboard() {
             const data = payload.new;
             if (data.is_sos_active) {
               setAlarmActive({ active: true, originName: data.origin_name || 'Familiar' });
+              setSosHistory(prev => {
+                const alreadyExists = prev.some(item => item.name === data.origin_name && (Date.now() - item.timestamp < 10000));
+                if (alreadyExists) return prev;
+                return [
+                  { id: data.origin_user_id || Date.now().toString(), name: data.origin_name || 'Familiar', timestamp: Date.now() },
+                  ...prev
+                ].slice(0, 5);
+              });
               playSiren();
               showToast(`🚨 ¡SOS de ${data.origin_name || 'un familiar'}!`);
             } else {
@@ -1238,15 +1248,28 @@ export default function MonitorDashboard() {
       )}
 
       {alarmActive.active && (
-        <div className="alarm-banner" style={{ position: 'absolute', top: '80px', left: '50%', transform: 'translateX(-50%)', zIndex: 9999, background: '#ef4444', padding: '16px 24px', borderRadius: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', boxShadow: '0 8px 32px rgba(239, 68, 68, 0.4)', color: 'white' }}>
+        <div className="alarm-banner" style={{ position: 'absolute', top: '80px', left: '50%', transform: 'translateX(-50%)', zIndex: 9999, background: '#ef4444', padding: '16px 24px', borderRadius: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', boxShadow: '0 8px 32px rgba(239, 68, 68, 0.4)', color: 'white', width: '280px', boxSizing: 'border-box' }}>
           <AlertCircle size={32} style={{ animation: 'bounce 1s infinite' }} />
-          <div>
-            <h3 style={{ margin: 0, fontSize: '16px' }}>🚨 ¡SOS ACTIVO!</h3>
+          <div style={{ textAlign: 'center' }}>
+            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 'bold' }}>🚨 ¡SOS ACTIVO!</h3>
             <p style={{ margin: '4px 0 0 0', fontSize: '13px', opacity: 0.9 }}>
-              {alarmActive.originName} ha iniciado una alerta de emergencia.
+              Última señal de: {alarmActive.originName}
             </p>
           </div>
-          <button onClick={stopSiren} className="glass-btn secondary" style={{ color: 'white', borderColor: 'white', width: '100%' }}>
+
+          {sosHistory.length > 1 && (
+            <div style={{ background: 'rgba(0,0,0,0.2)', padding: '8px', borderRadius: '8px', width: '100%', fontSize: '11px', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: '4px', boxSizing: 'border-box' }}>
+              <span style={{ fontWeight: 'bold', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '2px', display: 'block' }}>Secuencia Reciente:</span>
+              {sosHistory.map((item, idx) => (
+                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', opacity: idx === 0 ? 1 : 0.7 }}>
+                  <span>⚠️ {item.name}</span>
+                  <span>{new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <button onClick={stopSiren} className="glass-btn secondary" style={{ color: 'white', borderColor: 'white', width: '100%', padding: '8px', fontSize: '12px' }}>
             Silenciar Alerta Local
           </button>
         </div>

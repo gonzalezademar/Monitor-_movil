@@ -905,35 +905,84 @@ export default function ClientDashboard() {
     }
   }, [trackingTargetId, myLocation, familyMembers]);
 
-  // SOS status trigger
+  // SOS status trigger with offline retry queue
   useEffect(() => {
     if (!familyId || !userId) return;
+
+    let active = true;
+    let retryInterval: ReturnType<typeof setInterval> | null = null;
 
     const triggerSOS = async () => {
       if (isSOSActive) {
         stopRemoteAlarm();
         acquireWakeLock();
-        // Update SOS alerts row
-        await supabase.from('alerts').upsert({
-          family_id: familyId,
-          is_sos_active: true,
-          origin_user_id: userId,
-          origin_name: userName,
-          updated_at: new Date().toISOString()
-        });
+        
+        const attemptUpsert = async () => {
+          if (!active) return;
+          const { error } = await supabase.from('alerts').upsert({
+            family_id: familyId,
+            is_sos_active: true,
+            origin_user_id: userId,
+            origin_name: userName,
+            updated_at: new Date().toISOString()
+          });
+          
+          if (error) {
+            console.warn("Failed to send SOS alert, retrying in 5 seconds...", error);
+            if (!retryInterval && active) {
+              retryInterval = setInterval(attemptUpsert, 5000);
+            }
+          } else {
+            if (retryInterval) {
+              clearInterval(retryInterval);
+              retryInterval = null;
+            }
+          }
+        };
+        
+        await attemptUpsert();
       } else {
         if (!ghostModeActive) releaseWakeLock();
-        await supabase.from('alerts').upsert({
-          family_id: familyId,
-          is_sos_active: false,
-          origin_user_id: null,
-          origin_name: null,
-          updated_at: new Date().toISOString()
-        });
+        if (retryInterval) {
+          clearInterval(retryInterval);
+          retryInterval = null;
+        }
+        
+        const attemptClear = async () => {
+          if (!active) return;
+          const { error } = await supabase.from('alerts').upsert({
+            family_id: familyId,
+            is_sos_active: false,
+            origin_user_id: null,
+            origin_name: null,
+            updated_at: new Date().toISOString()
+          });
+          
+          if (error) {
+            console.warn("Failed to clear SOS status, retrying in 5 seconds...", error);
+            if (!retryInterval && active) {
+              retryInterval = setInterval(attemptClear, 5000);
+            }
+          } else {
+            if (retryInterval) {
+              clearInterval(retryInterval);
+              retryInterval = null;
+            }
+          }
+        };
+        
+        await attemptClear();
       }
     };
     
     triggerSOS();
+
+    return () => {
+      active = false;
+      if (retryInterval) {
+        clearInterval(retryInterval);
+      }
+    };
   }, [isSOSActive, familyId, userId, userName, ghostModeActive]);
 
   const dispatchChatMessage = async (msg: ChatMessage) => {
@@ -1546,6 +1595,7 @@ export default function ClientDashboard() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', color: '#64748b', fontWeight: '500' }}>
             <span>• Esquina Izquierda: SOS Silencioso (Pantalla apagada)</span>
             <span>• Esquina Derecha: SOS Ruidoso (Alarma sonora local)</span>
+            <span style={{ color: '#a855f7', marginTop: '4px', fontSize: '10.5px' }}>ℹ️ El modo silencioso no emitirá sonido local ni encenderá luces para proteger tu discreción.</span>
           </div>
         </div>
 
