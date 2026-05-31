@@ -31,6 +31,18 @@ function MapAutoCenter({ target }: { target: [number, number] | null }) {
   return null;
 }
 
+function MapInteractionHandler({ onInteraction }: { onInteraction: () => void }) {
+  useMapEvents({
+    dragstart() {
+      onInteraction();
+    },
+    zoomstart() {
+      onInteraction();
+    }
+  });
+  return null;
+}
+
 function getDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
   const R = 6371e3; 
   const p1 = lat1 * Math.PI/180;
@@ -67,8 +79,6 @@ export default function MonitorDashboard() {
     familyId,
     familyCode,
     logout, 
-    fenceRadius, 
-    setFenceRadius, 
     fenceCenterLat,
     fenceCenterLng,
     setFenceCenter,
@@ -82,7 +92,13 @@ export default function MonitorDashboard() {
     isCheckingUpdates, 
     updateCheckResult, 
     resetUpdateCheckResult,
-    updateTrackingStatus
+    updateTrackingStatus,
+    safeZones,
+    addSafeZone,
+    updateSafeZone,
+    deleteSafeZone,
+    toggleSafeZone,
+    fetchSafeZones
   } = useStore();
 
   const navigate = useNavigate();
@@ -90,8 +106,18 @@ export default function MonitorDashboard() {
     resetUpdateCheckResult();
     setIsMenuOpen(true);
   };
-  const [localRadius, setLocalRadius] = useState(fenceRadius);
   const [isSelectingCenterOnMap, setIsSelectingCenterOnMap] = useState(false);
+
+  // States for multiple safe zones
+  const [isProgrammingSafeZone, setIsProgrammingSafeZone] = useState(false);
+  const [editingSafeZoneId, setEditingSafeZoneId] = useState<string | null>(null);
+  const [newZoneName, setNewZoneName] = useState('');
+  const [newZoneRadius, setNewZoneRadius] = useState(100);
+  const [newZoneLat, setNewZoneLat] = useState<number | null>(null);
+  const [newZoneLng, setNewZoneLng] = useState<number | null>(null);
+  const [newZoneChildId, setNewZoneChildId] = useState<string>('');
+
+  const [isAutoCentering, setIsAutoCentering] = useState(true);
 
   const confirmLogout = () => {
     if (unlinkConfirmName.trim() === userName.trim()) {
@@ -439,6 +465,7 @@ export default function MonitorDashboard() {
 
     fetchChatMessages();
     fetchFamilyDetails();
+    fetchSafeZones();
 
     // Subscribe to Alerts
     const alertsSub = supabase
@@ -475,29 +502,31 @@ export default function MonitorDashboard() {
               if (updated[row.user_id]) {
                 const clientName = updated[row.user_id].name;
                 
-                // Geofence checking
-                const centerLat = fenceCenterLat !== null ? fenceCenterLat : (myLocation ? myLocation[0] : null);
-                const centerLng = fenceCenterLng !== null ? fenceCenterLng : (myLocation ? myLocation[1] : null);
-                if (centerLat !== null && centerLng !== null) {
-                  const dist = getDistance(centerLat, centerLng, row.latitude, row.longitude);
-                  if (dist > localRadius) {
-                    const currentStrikes = (geofenceStrikesRef.current[clientName] || 0) + 1;
-                    geofenceStrikesRef.current[clientName] = currentStrikes;
+                // New multiple geofences checking
+                const currentZones = useStore.getState().safeZones || [];
+                const childZones = currentZones.filter(z => z.is_active && z.child_id === row.user_id);
+                
+                childZones.forEach(zone => {
+                  const dist = getDistance(zone.latitude, zone.longitude, row.latitude, row.longitude);
+                  const strikeKey = `${row.user_id}-${zone.id}`;
+                  if (dist > zone.radius) {
+                    const currentStrikes = (geofenceStrikesRef.current[strikeKey] || 0) + 1;
+                    geofenceStrikesRef.current[strikeKey] = currentStrikes;
                     
                     if (currentStrikes === 3) {
-                      showToast(`⚠️ ${clientName} salió de la zona segura (${Math.round(dist)}m)`);
+                      showToast(`⚠️ ${clientName} salió de la zona segura "${zone.name}" (${Math.round(dist)}m)`);
                       playTonalSound('GEOFENCE_BREACH');
                     } else if (currentStrikes > 3 && currentStrikes % 10 === 0) {
-                      showToast(`⚠️ ${clientName} sigue fuera de zona (${Math.round(dist)}m)`);
+                      showToast(`⚠️ ${clientName} sigue fuera de la zona "${zone.name}" (${Math.round(dist)}m)`);
                       playTonalSound('GEOFENCE_BREACH');
                     }
                   } else {
-                    if ((geofenceStrikesRef.current[clientName] || 0) >= 3) {
-                      showToast(`✅ ${clientName} regresó a la zona segura.`);
+                    if ((geofenceStrikesRef.current[strikeKey] || 0) >= 3) {
+                      showToast(`✅ ${clientName} regresó a la zona segura "${zone.name}".`);
                     }
-                    geofenceStrikesRef.current[clientName] = 0;
+                    geofenceStrikesRef.current[strikeKey] = 0;
                   }
-                }
+                });
 
                 updated[row.user_id] = {
                   ...updated[row.user_id],
@@ -625,7 +654,7 @@ export default function MonitorDashboard() {
       messagesSub.unsubscribe();
       broadcastChannel.unsubscribe();
     };
-  }, [familyId, userId, myLocation, localRadius, fenceCenterLat, fenceCenterLng, addMessage, checkUpdates]);
+  }, [familyId, userId, myLocation, fenceCenterLat, fenceCenterLng, addMessage, checkUpdates, fetchSafeZones]);
 
   // Cleanup active timeouts/intervals on unmount to prevent state updates/audio leaks
   useEffect(() => {
@@ -702,7 +731,7 @@ export default function MonitorDashboard() {
 
   // Reactive Map Centering
   useEffect(() => {
-    if (!trackingTargetId) return;
+    if (!isAutoCentering || !trackingTargetId) return;
     if (trackingTargetId === 'me') {
       if (myLocation) setMapCenterTarget(myLocation);
     } else {
@@ -711,7 +740,7 @@ export default function MonitorDashboard() {
         setMapCenterTarget([client.lat, client.lng]);
       }
     }
-  }, [trackingTargetId, myLocation, clients]);
+  }, [trackingTargetId, myLocation, clients, isAutoCentering]);
 
   // Periodic connection timeouts watcher
   useEffect(() => {
@@ -942,12 +971,142 @@ export default function MonitorDashboard() {
     }
   };
 
-  const fenceCenter: [number, number] | null = fenceCenterLat !== null && fenceCenterLng !== null
-    ? [fenceCenterLat, fenceCenterLng]
-    : myLocation;
-
   return (
     <div className="dashboard-container" style={{ position: 'relative', overflow: 'hidden' }}>
+      {isProgrammingSafeZone && (
+        <div style={{ 
+          position: 'absolute', 
+          top: '75px', 
+          left: '50%', 
+          transform: 'translateX(-50%)', 
+          background: 'rgba(15, 12, 41, 0.98)', 
+          border: '2px solid #8b5cf6', 
+          color: 'white', 
+          padding: '16px', 
+          borderRadius: '16px', 
+          zIndex: 9999, 
+          width: '90%', 
+          maxWidth: '360px', 
+          boxShadow: '0 8px 32px rgba(139, 92, 246, 0.3)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '12px'
+        }}>
+          <h3 style={{ margin: 0, fontSize: '15px', color: '#a78bfa', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            📍 {editingSafeZoneId ? 'Editar Zona Segura' : 'Nueva Zona Segura'}
+          </h3>
+          <p style={{ margin: 0, fontSize: '11px', opacity: 0.8 }}>
+            Toca el mapa para fijar el centro. Luego completa los detalles.
+          </p>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <input 
+              type="text" 
+              placeholder="Nombre de la zona (ej: Colegio)" 
+              value={newZoneName}
+              onChange={(e) => setNewZoneName(e.target.value)}
+              className="glass-input"
+              style={{ margin: 0, fontSize: '13px', padding: '8px', background: 'rgba(255, 255, 255, 0.05)', color: 'white', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px' }}
+            />
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              <label style={{ fontSize: '11px', opacity: 0.6, textAlign: 'left' }}>Asignar a:</label>
+              <select
+                value={newZoneChildId}
+                onChange={(e) => setNewZoneChildId(e.target.value)}
+                className="glass-input"
+                style={{ margin: 0, fontSize: '13px', padding: '8px', background: 'rgba(30, 27, 75, 0.95)', color: 'white', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', width: '100%' }}
+              >
+                <option value="" disabled>Selecciona un hijo...</option>
+                {Object.entries(clients)
+                  .filter(([_, c]) => c.role === 'client')
+                  .map(([id, c]) => (
+                    <option key={id} value={id}>{c.name}</option>
+                  ))
+                }
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
+                <span style={{ opacity: 0.6 }}>Radio:</span>
+                <span style={{ fontWeight: 'bold' }}>{newZoneRadius}m</span>
+              </div>
+              <input 
+                type="range" 
+                min="50" 
+                max="2000" 
+                step="50" 
+                value={newZoneRadius} 
+                onChange={(e) => setNewZoneRadius(Number(e.target.value))} 
+                style={{ accentColor: '#8b5cf6', width: '100%' }} 
+              />
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+            <button 
+              onClick={async () => {
+                if (!newZoneName.trim()) {
+                  alert("Por favor, ingresa un nombre para la zona.");
+                  return;
+                }
+                if (!newZoneChildId) {
+                  alert("Por favor, selecciona a cuál de tus hijos asignar la zona.");
+                  return;
+                }
+                if (newZoneLat === null || newZoneLng === null) {
+                  alert("Por favor, toca el mapa para ubicar el centro de la zona.");
+                  return;
+                }
+
+                if (editingSafeZoneId) {
+                  await updateSafeZone({
+                    id: editingSafeZoneId,
+                    family_id: familyId || '',
+                    child_id: newZoneChildId,
+                    name: newZoneName.trim(),
+                    latitude: newZoneLat,
+                    longitude: newZoneLng,
+                    radius: newZoneRadius,
+                    is_active: true
+                  });
+                  showToast(`✅ Zona "${newZoneName}" actualizada`);
+                } else {
+                  await addSafeZone({
+                    child_id: newZoneChildId,
+                    name: newZoneName.trim(),
+                    latitude: newZoneLat,
+                    longitude: newZoneLng,
+                    radius: newZoneRadius,
+                    is_active: true
+                  });
+                  showToast(`✅ Zona "${newZoneName}" creada`);
+                }
+
+                setIsProgrammingSafeZone(false);
+                setEditingSafeZoneId(null);
+                setIsAutoCentering(true);
+              }}
+              className="glass-btn primary"
+              style={{ flex: 1, padding: '8px', fontSize: '12px', background: '#ec4899', borderColor: '#ec4899', color: 'white' }}
+            >
+              Guardar
+            </button>
+            <button 
+              onClick={() => {
+                setIsProgrammingSafeZone(false);
+                setEditingSafeZoneId(null);
+                setIsAutoCentering(true);
+              }}
+              className="glass-btn secondary"
+              style={{ flex: 1, padding: '8px', fontSize: '12px' }}
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
       {isSelectingCenterOnMap && (
         <div style={{ position: 'absolute', top: 75, left: '50%', transform: 'translateX(-50%)', background: '#ec4899', color: 'white', padding: '12px 24px', borderRadius: '12px', zIndex: 9999, fontSize: '13px', fontWeight: 'bold', boxShadow: '0 4px 20px rgba(236, 72, 153, 0.4)', animation: 'pulse 2s infinite' }}>
           📍 Toca en cualquier lugar del mapa para fijar la zona segura
@@ -988,9 +1147,16 @@ export default function MonitorDashboard() {
       )}
 
       <MapContainer center={myLocation || [-34.6037, -58.3816]} zoom={15} style={{ height: '100dvh', width: '100vw' }} zoomControl={false}>
-        <MapAutoCenter target={mapCenterTarget} />
+        {isAutoCentering && mapCenterTarget && (
+          <MapAutoCenter target={mapCenterTarget} />
+        )}
+        <MapInteractionHandler onInteraction={() => setIsAutoCentering(false)} />
         <MapClickHandler onClick={(e) => {
-          if (isSelectingCenterOnMap) {
+          if (isProgrammingSafeZone) {
+            setNewZoneLat(e.latlng.lat);
+            setNewZoneLng(e.latlng.lng);
+            showToast("📍 Centro de zona seleccionado");
+          } else if (isSelectingCenterOnMap) {
             setFenceCenter(e.latlng.lat, e.latlng.lng);
             setIsSelectingCenterOnMap(false);
             showToast("📍 Zona segura fijada en el mapa");
@@ -1006,6 +1172,7 @@ export default function MonitorDashboard() {
             eventHandlers={{
               click: () => {
                 setTrackingTargetId('me');
+                setIsAutoCentering(true);
                 setMapCenterTarget(myLocation);
               }
             }}
@@ -1014,19 +1181,49 @@ export default function MonitorDashboard() {
           </Marker>
         )}
 
-        {fenceCenter && (
-          <Circle center={fenceCenter} radius={localRadius} pathOptions={{ color: '#ec4899', fillColor: '#ec4899', fillOpacity: 0.08 }} />
+        {/* Preview circle during programming */}
+        {isProgrammingSafeZone && newZoneLat !== null && newZoneLng !== null && (
+          <>
+            <Circle 
+              center={[newZoneLat, newZoneLng]} 
+              radius={newZoneRadius} 
+              pathOptions={{ color: '#8b5cf6', fillColor: '#8b5cf6', fillOpacity: 0.15, dashArray: '5, 5' }} 
+            />
+            <Marker 
+              position={[newZoneLat, newZoneLng]} 
+              icon={safeZoneIcon}
+            >
+              <Popup>Centro de la Nueva Zona</Popup>
+            </Marker>
+          </>
         )}
 
-        {fenceCenterLat !== null && fenceCenterLng !== null && (
-          <Marker 
-            key="safezone"
-            position={[fenceCenterLat, fenceCenterLng]} 
-            icon={safeZoneIcon}
-          >
-            <Popup>Centro de la Zona Segura</Popup>
-          </Marker>
-        )}
+        {/* Render Multiple Active Safe Zones */}
+        {safeZones.map(zone => {
+          if (!zone.is_active) return null;
+          const childName = clients[zone.child_id]?.name || 'Hijo';
+          return (
+            <React.Fragment key={zone.id}>
+              <Circle 
+                center={[zone.latitude, zone.longitude]} 
+                radius={zone.radius} 
+                pathOptions={{ color: '#ec4899', fillColor: '#ec4899', fillOpacity: 0.05, weight: 1.5 }} 
+              />
+              <Marker 
+                position={[zone.latitude, zone.longitude]} 
+                icon={safeZoneIcon}
+              >
+                <Popup>
+                  <div style={{ textAlign: 'center', fontSize: '12px' }}>
+                    <strong>{zone.name}</strong><br/>
+                    Asignado a: {childName}<br/>
+                    Radio: {zone.radius}m
+                  </div>
+                </Popup>
+              </Marker>
+            </React.Fragment>
+          );
+        })}
 
         {Object.entries(clients).map(([id, client]) => {
           if (client.lat === 0 && client.lng === 0) return null;
@@ -1040,6 +1237,7 @@ export default function MonitorDashboard() {
                 eventHandlers={{
                   click: () => {
                     setTrackingTargetId(id);
+                    setIsAutoCentering(true);
                     setMapCenterTarget([client.lat, client.lng]);
                   }
                 }}
@@ -1104,6 +1302,7 @@ export default function MonitorDashboard() {
           className={`map-avatar-btn ${trackingTargetId === 'me' ? 'active' : ''}`}
           onClick={() => {
             setTrackingTargetId('me');
+            setIsAutoCentering(true);
             if (myLocation) setMapCenterTarget(myLocation);
           }}
           title="Centrar en mí"
@@ -1121,6 +1320,7 @@ export default function MonitorDashboard() {
             className={`map-avatar-btn ${trackingTargetId === id ? 'active' : ''} ${client.role === 'monitor' ? 'monitor' : ''}`}
             onClick={() => {
               setTrackingTargetId(id);
+              setIsAutoCentering(true);
               if (client.lat !== 0 && client.lng !== 0) {
                 setMapCenterTarget([client.lat, client.lng]);
               }
@@ -1288,72 +1488,93 @@ export default function MonitorDashboard() {
           )}
         </div>
 
+        {/* NUEVA GESTIÓN DE MÚLTIPLES ZONAS SEGURAS */}
         <div style={{ marginBottom: '32px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <p style={{ fontSize: '11px', opacity: 0.5, textTransform: 'uppercase', letterSpacing: '1px', margin: 0 }}>Zona Segura</p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <span style={{ fontSize: '14px' }}>Radio: {localRadius}m</span>
-            <input 
-              type="range" 
-              min="50" 
-              max="2000" 
-              step="50" 
-              value={localRadius} 
-              onChange={(e) => {
-                const val = Number(e.target.value);
-                setLocalRadius(val);
-                setFenceRadius(val);
-              }} 
-              style={{ flex: 1, accentColor: '#ec4899' }} 
-            />
-          </div>
+          <p style={{ fontSize: '11px', opacity: 0.5, textTransform: 'uppercase', letterSpacing: '1px', margin: 0 }}>Zonas Seguras</p>
+          
+          <button 
+            onClick={() => {
+              setIsProgrammingSafeZone(true);
+              setEditingSafeZoneId(null);
+              setNewZoneName('');
+              setNewZoneRadius(100);
+              if (myLocation) {
+                setNewZoneLat(myLocation[0]);
+                setNewZoneLng(myLocation[1]);
+              } else {
+                setNewZoneLat(-34.6037);
+                setNewZoneLng(-58.3816);
+              }
+              const firstChildId = Object.keys(clients).find(id => clients[id].role === 'client') || '';
+              setNewZoneChildId(firstChildId);
+              setIsAutoCentering(false);
+              setIsMenuOpen(false);
+              showToast("📍 Mueve el mapa y toca donde desees ubicar la zona");
+            }}
+            className="glass-btn primary"
+            style={{ width: '100%', padding: '10px', fontSize: '13px', background: '#ec4899', borderColor: '#ec4899', color: 'white', fontWeight: 'bold' }}
+          >
+            ➕ Programar Nueva Zona
+          </button>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px', background: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ opacity: 0.8 }}>Modo de Cerco:</span>
-              <span style={{ fontWeight: 'bold', color: fenceCenterLat !== null ? '#f472b6' : '#4ade80' }}>
-                {fenceCenterLat !== null ? '📍 Estático (Fijo)' : '🔄 Dinámico (Móvil)'}
-              </span>
-            </div>
-            
-            <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
-              <button 
-                onClick={() => setIsSelectingCenterOnMap(!isSelectingCenterOnMap)} 
-                className={`glass-btn ${isSelectingCenterOnMap ? 'primary' : ''}`}
-                style={{ flex: 1, padding: '6px', fontSize: '11px', background: isSelectingCenterOnMap ? '#ec4899' : 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', cursor: 'pointer' }}
-              >
-                {isSelectingCenterOnMap ? 'Toca el mapa...' : 'Fijar en Mapa'}
-              </button>
-              
-              {Object.entries(clients).length > 0 && (
-                <button 
-                  onClick={() => {
-                    const targetClient = clients[trackingTargetId] || Object.values(clients).find(c => c.lat !== 0);
-                    if (targetClient && targetClient.lat !== 0) {
-                      setFenceCenter(targetClient.lat, targetClient.lng);
-                      showToast(`📍 Zona fija anclada en ${targetClient.name}`);
-                    } else {
-                      showToast("No hay ubicación del familiar disponible");
-                    }
-                  }} 
-                  className="glass-btn"
-                  style={{ flex: 1, padding: '6px', fontSize: '11px', background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', cursor: 'pointer' }}
-                >
-                  Anclar en Hijo
-                </button>
-              )}
-            </div>
-
-            {fenceCenterLat !== null && (
-              <button 
-                onClick={() => {
-                  setFenceCenter(null, null);
-                  showToast("🔄 Zona segura restablecida (sigue al Padre)");
-                }} 
-                className="glass-btn"
-                style={{ width: '100%', padding: '6px', fontSize: '11px', background: 'rgba(239,68,68,0.15)', color: '#fca5a5', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '6px', cursor: 'pointer', marginTop: '2px' }}
-              >
-                Restablecer (Seguir al Padre)
-              </button>
+          {/* List of safe zones */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '200px', overflowY: 'auto', paddingRight: '4px' }}>
+            {safeZones.length === 0 ? (
+              <p style={{ fontSize: '12px', opacity: 0.5, textAlign: 'center', margin: '8px 0' }}>No hay zonas configuradas</p>
+            ) : (
+              safeZones.map(zone => {
+                const childName = clients[zone.child_id]?.name || 'Hijo';
+                return (
+                  <div key={zone.id} style={{ display: 'flex', flexDirection: 'column', gap: '4px', background: 'rgba(255,255,255,0.03)', padding: '10px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: '13px', fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '140px', textAlign: 'left' }} title={zone.name}>
+                        {zone.name}
+                      </span>
+                      <input 
+                        type="checkbox" 
+                        checked={zone.is_active}
+                        onChange={(e) => toggleSafeZone(zone.id, e.target.checked)}
+                        style={{ accentColor: '#ec4899', cursor: 'pointer' }}
+                        title={zone.is_active ? "Desactivar zona" : "Activar zona"}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', opacity: 0.6 }}>
+                      <span>Hijo: {childName}</span>
+                      <span>Radio: {zone.radius}m</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                      <button
+                        onClick={() => {
+                          setIsProgrammingSafeZone(true);
+                          setEditingSafeZoneId(zone.id);
+                          setNewZoneName(zone.name);
+                          setNewZoneRadius(zone.radius);
+                          setNewZoneLat(zone.latitude);
+                          setNewZoneLng(zone.longitude);
+                          setNewZoneChildId(zone.child_id);
+                          setIsAutoCentering(false);
+                          setIsMenuOpen(false);
+                        }}
+                        className="glass-btn secondary"
+                        style={{ flex: 1, padding: '4px', fontSize: '11px' }}
+                      >
+                        Editar
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (window.confirm(`¿Seguro que deseas eliminar la zona "${zone.name}"?`)) {
+                            deleteSafeZone(zone.id);
+                          }
+                        }}
+                        className="glass-btn secondary"
+                        style={{ flex: 1, padding: '4px', fontSize: '11px', color: '#fca5a5', borderColor: 'rgba(239, 68, 68, 0.2)' }}
+                      >
+                        Eliminar
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
             )}
           </div>
         </div>

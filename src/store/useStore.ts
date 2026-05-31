@@ -10,6 +10,17 @@ export interface ChatMessage {
   timestamp: number;
 }
 
+export interface SafeZone {
+  id: string;
+  family_id: string;
+  child_id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  radius: number;
+  is_active: boolean;
+}
+
 interface AppState {
   role: 'monitor' | 'client' | null;
   userName: string;
@@ -32,6 +43,15 @@ interface AppState {
   fenceCenterLat: number | null;
   fenceCenterLng: number | null;
   setFenceCenter: (lat: number | null, lng: number | null) => void;
+  
+  // Safe Zones
+  safeZones: SafeZone[];
+  setSafeZones: (zones: SafeZone[]) => void;
+  fetchSafeZones: () => Promise<void>;
+  addSafeZone: (zone: Omit<SafeZone, 'id' | 'family_id'>) => Promise<{ error: string | null }>;
+  updateSafeZone: (zone: SafeZone) => Promise<{ error: string | null }>;
+  deleteSafeZone: (id: string) => Promise<{ error: string | null }>;
+  toggleSafeZone: (id: string, active: boolean) => Promise<{ error: string | null }>;
   
   // Tactical Chat & Offline queue
   messages: ChatMessage[];
@@ -89,6 +109,117 @@ export const useStore = create<AppState>()(
       fenceCenterLat: null,
       fenceCenterLng: null,
       setFenceCenter: (lat, lng) => set({ fenceCenterLat: lat, fenceCenterLng: lng }),
+      
+      safeZones: [] as SafeZone[],
+      setSafeZones: (zones) => set({ safeZones: zones }),
+      fetchSafeZones: async () => {
+        const familyId = get().familyId;
+        if (!familyId) return;
+        try {
+          const { data, error } = await supabase
+            .from('safe_zones')
+            .select('*')
+            .eq('family_id', familyId);
+          if (error) {
+            console.warn("Supabase safe_zones error, using local fallback:", error.message);
+            return;
+          }
+          if (data) {
+            const formatted = data.map((z: any) => ({
+              id: z.id,
+              family_id: z.family_id,
+              child_id: z.child_id,
+              name: z.name,
+              latitude: z.latitude,
+              longitude: z.longitude,
+              radius: z.radius,
+              is_active: z.is_active
+            }));
+            set({ safeZones: formatted });
+          }
+        } catch (e: any) {
+          console.warn("Failed to fetch safe zones from Supabase:", e);
+        }
+      },
+      addSafeZone: async (zone) => {
+        const familyId = get().familyId;
+        if (!familyId) return { error: "No hay grupo familiar" };
+        const id = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2);
+        const newZone: SafeZone = { ...zone, id, family_id: familyId };
+        
+        set((state) => ({ safeZones: [...state.safeZones, newZone] }));
+
+        try {
+          const { error } = await supabase.from('safe_zones').insert({
+            id,
+            family_id: familyId,
+            child_id: zone.child_id,
+            name: zone.name,
+            latitude: zone.latitude,
+            longitude: zone.longitude,
+            radius: zone.radius,
+            is_active: zone.is_active
+          });
+          if (error) {
+            console.warn("Failed to insert safe zone to Supabase, local-only saved:", error.message);
+          }
+        } catch (e: any) {
+          console.warn("Exception inserting safe zone to Supabase:", e);
+        }
+        return { error: null };
+      },
+      updateSafeZone: async (zone) => {
+        set((state) => ({
+          safeZones: state.safeZones.map(z => z.id === zone.id ? zone : z)
+        }));
+
+        try {
+          const { error } = await supabase.from('safe_zones').update({
+            child_id: zone.child_id,
+            name: zone.name,
+            latitude: zone.latitude,
+            longitude: zone.longitude,
+            radius: zone.radius,
+            is_active: zone.is_active
+          }).eq('id', zone.id);
+          if (error) {
+            console.warn("Failed to update safe zone in Supabase, updated locally:", error.message);
+          }
+        } catch (e: any) {
+          console.warn("Exception updating safe zone in Supabase:", e);
+        }
+        return { error: null };
+      },
+      deleteSafeZone: async (id) => {
+        set((state) => ({
+          safeZones: state.safeZones.filter(z => z.id !== id)
+        }));
+
+        try {
+          const { error } = await supabase.from('safe_zones').delete().eq('id', id);
+          if (error) {
+            console.warn("Failed to delete safe zone from Supabase, deleted locally:", error.message);
+          }
+        } catch (e: any) {
+          console.warn("Exception deleting safe zone from Supabase:", e);
+        }
+        return { error: null };
+      },
+      toggleSafeZone: async (id, active) => {
+        set((state) => ({
+          safeZones: state.safeZones.map(z => z.id === id ? { ...z, is_active: active } : z)
+        }));
+
+        try {
+          const { error } = await supabase.from('safe_zones').update({ is_active: active }).eq('id', id);
+          if (error) {
+            console.warn("Failed to toggle safe zone in Supabase, toggled locally:", error.message);
+          }
+        } catch (e: any) {
+          console.warn("Exception toggling safe zone in Supabase:", e);
+        }
+        return { error: null };
+      },
       
       messages: [] as ChatMessage[],
       offlineQueue: [] as any[],
@@ -193,6 +324,7 @@ export const useStore = create<AppState>()(
               familyId: profile.family_id,
               masterServerId: profile.family_id,
             });
+            get().fetchSafeZones();
           }
         }
       },
@@ -297,6 +429,7 @@ export const useStore = create<AppState>()(
             familyId: activeFamilyId,
             masterServerId: activeFamilyId,
           });
+          get().fetchSafeZones();
         }
         return { error: null };
       },
@@ -381,6 +514,7 @@ export const useStore = create<AppState>()(
               familyId: activeFamilyId,
               masterServerId: activeFamilyId,
             });
+            get().fetchSafeZones();
             return { error: null };
           }
 
@@ -428,6 +562,7 @@ export const useStore = create<AppState>()(
             familyId: newFamilyId,
             masterServerId: newFamilyId,
           });
+          get().fetchSafeZones();
         }
         return { error: null };
       },
@@ -448,7 +583,8 @@ export const useStore = create<AppState>()(
           offlineQueue: [],
           userId: null,
           userEmail: null,
-          familyId: null
+          familyId: null,
+          safeZones: []
         });
       },
 
@@ -491,6 +627,7 @@ export const useStore = create<AppState>()(
           masterServerId: familyCode
         });
 
+        get().fetchSafeZones();
         return { error: null };
       },
 
@@ -538,6 +675,7 @@ export const useStore = create<AppState>()(
         fenceRadius: state.fenceRadius,
         fenceCenterLat: state.fenceCenterLat,
         fenceCenterLng: state.fenceCenterLng,
+        safeZones: state.safeZones,
         appVersion: state.appVersion
       })
     }
