@@ -54,10 +54,18 @@ function getDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
   return R * c;
 }
 
-function MapClickHandler({ onClick }: { onClick: (e: any) => void }) {
+function MapClickHandler({ onClick, onLongPress }: { onClick: (e: any) => void; onLongPress?: (e: any) => void }) {
   useMapEvents({
     click(e) {
       onClick(e);
+    },
+    contextmenu(e) {
+      if (e.originalEvent) {
+        e.originalEvent.preventDefault();
+      }
+      if (onLongPress) {
+        onLongPress(e);
+      }
     }
   });
   return null;
@@ -118,6 +126,7 @@ export default function MonitorDashboard() {
   const [newZoneChildId, setNewZoneChildId] = useState<string>('');
 
   const [isAutoCentering, setIsAutoCentering] = useState(true);
+  const [safeZoneSubMenu, setSafeZoneSubMenu] = useState<'menu' | 'create_select_child' | 'manage'>('menu');
 
   const confirmLogout = () => {
     if (unlinkConfirmName.trim() === userName.trim()) {
@@ -995,8 +1004,13 @@ export default function MonitorDashboard() {
           <h3 style={{ margin: 0, fontSize: '15px', color: '#a78bfa', display: 'flex', alignItems: 'center', gap: '6px' }}>
             📍 {editingSafeZoneId ? 'Editar Zona Segura' : 'Nueva Zona Segura'}
           </h3>
+          <p style={{ margin: 0, fontSize: '11px', opacity: 0.9 }}>
+            Familiar: <strong style={{ color: '#ec4899' }}>{clients[newZoneChildId]?.name || 'Hijo'}</strong>
+          </p>
           <p style={{ margin: 0, fontSize: '11px', opacity: 0.8 }}>
-            Toca el mapa para fijar el centro. Luego completa los detalles.
+            {newZoneLat !== null && newZoneLng !== null 
+              ? "✅ Punto seleccionado. Completa el nombre y radio." 
+              : "👉 Mantén pulsado en el mapa durante 2 segundos para marcar el centro de la zona."}
           </p>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -1008,24 +1022,6 @@ export default function MonitorDashboard() {
               className="glass-input"
               style={{ margin: 0, fontSize: '13px', padding: '8px', background: 'rgba(255, 255, 255, 0.05)', color: 'white', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px' }}
             />
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-              <label style={{ fontSize: '11px', opacity: 0.6, textAlign: 'left' }}>Asignar a:</label>
-              <select
-                value={newZoneChildId}
-                onChange={(e) => setNewZoneChildId(e.target.value)}
-                className="glass-input"
-                style={{ margin: 0, fontSize: '13px', padding: '8px', background: 'rgba(30, 27, 75, 0.95)', color: 'white', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', width: '100%' }}
-              >
-                <option value="" disabled>Selecciona un hijo...</option>
-                {Object.entries(clients)
-                  .filter(([_, c]) => c.role === 'client')
-                  .map(([id, c]) => (
-                    <option key={id} value={id}>{c.name}</option>
-                  ))
-                }
-              </select>
-            </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
@@ -1051,12 +1047,8 @@ export default function MonitorDashboard() {
                   alert("Por favor, ingresa un nombre para la zona.");
                   return;
                 }
-                if (!newZoneChildId) {
-                  alert("Por favor, selecciona a cuál de tus hijos asignar la zona.");
-                  return;
-                }
                 if (newZoneLat === null || newZoneLng === null) {
-                  alert("Por favor, toca el mapa para ubicar el centro de la zona.");
+                  alert("Por favor, mantén pulsado en el mapa para ubicar el centro de la zona.");
                   return;
                 }
 
@@ -1087,17 +1079,19 @@ export default function MonitorDashboard() {
                 setIsProgrammingSafeZone(false);
                 setEditingSafeZoneId(null);
                 setIsAutoCentering(true);
+                setSafeZoneSubMenu('manage');
               }}
               className="glass-btn primary"
               style={{ flex: 1, padding: '8px', fontSize: '12px', background: '#ec4899', borderColor: '#ec4899', color: 'white' }}
             >
-              Guardar
+              Aceptar
             </button>
             <button 
               onClick={() => {
                 setIsProgrammingSafeZone(false);
                 setEditingSafeZoneId(null);
                 setIsAutoCentering(true);
+                setSafeZoneSubMenu('menu');
               }}
               className="glass-btn secondary"
               style={{ flex: 1, padding: '8px', fontSize: '12px' }}
@@ -1152,14 +1146,16 @@ export default function MonitorDashboard() {
         )}
         <MapInteractionHandler onInteraction={() => setIsAutoCentering(false)} />
         <MapClickHandler onClick={(e) => {
+          if (isSelectingCenterOnMap) {
+            setFenceCenter(e.latlng.lat, e.latlng.lng);
+            setIsSelectingCenterOnMap(false);
+            showToast("📍 Zona segura fijada en el mapa");
+          }
+        }} onLongPress={(e) => {
           if (isProgrammingSafeZone) {
             setNewZoneLat(e.latlng.lat);
             setNewZoneLng(e.latlng.lng);
             showToast("📍 Centro de zona seleccionado");
-          } else if (isSelectingCenterOnMap) {
-            setFenceCenter(e.latlng.lat, e.latlng.lng);
-            setIsSelectingCenterOnMap(false);
-            showToast("📍 Zona segura fijada en el mapa");
           }
         }} />
         <TileLayer url={mapTheme === 'dark' ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"} />
@@ -1491,92 +1487,154 @@ export default function MonitorDashboard() {
         {/* NUEVA GESTIÓN DE MÚLTIPLES ZONAS SEGURAS */}
         <div style={{ marginBottom: '32px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <p style={{ fontSize: '11px', opacity: 0.5, textTransform: 'uppercase', letterSpacing: '1px', margin: 0 }}>Zonas Seguras</p>
-          
-          <button 
-            onClick={() => {
-              setIsProgrammingSafeZone(true);
-              setEditingSafeZoneId(null);
-              setNewZoneName('');
-              setNewZoneRadius(100);
-              if (myLocation) {
-                setNewZoneLat(myLocation[0]);
-                setNewZoneLng(myLocation[1]);
-              } else {
-                setNewZoneLat(-34.6037);
-                setNewZoneLng(-58.3816);
-              }
-              const firstChildId = Object.keys(clients).find(id => clients[id].role === 'client') || '';
-              setNewZoneChildId(firstChildId);
-              setIsAutoCentering(false);
-              setIsMenuOpen(false);
-              showToast("📍 Mueve el mapa y toca donde desees ubicar la zona");
-            }}
-            className="glass-btn primary"
-            style={{ width: '100%', padding: '10px', fontSize: '13px', background: '#ec4899', borderColor: '#ec4899', color: 'white', fontWeight: 'bold' }}
-          >
-            ➕ Programar Nueva Zona
-          </button>
 
-          {/* List of safe zones */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '200px', overflowY: 'auto', paddingRight: '4px' }}>
-            {safeZones.length === 0 ? (
-              <p style={{ fontSize: '12px', opacity: 0.5, textAlign: 'center', margin: '8px 0' }}>No hay zonas configuradas</p>
-            ) : (
-              safeZones.map(zone => {
-                const childName = clients[zone.child_id]?.name || 'Hijo';
-                return (
-                  <div key={zone.id} style={{ display: 'flex', flexDirection: 'column', gap: '4px', background: 'rgba(255,255,255,0.03)', padding: '10px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span style={{ fontSize: '13px', fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '140px', textAlign: 'left' }} title={zone.name}>
-                        {zone.name}
-                      </span>
-                      <input 
-                        type="checkbox" 
-                        checked={zone.is_active}
-                        onChange={(e) => toggleSafeZone(zone.id, e.target.checked)}
-                        style={{ accentColor: '#ec4899', cursor: 'pointer' }}
-                        title={zone.is_active ? "Desactivar zona" : "Activar zona"}
-                      />
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', opacity: 0.6 }}>
-                      <span>Hijo: {childName}</span>
-                      <span>Radio: {zone.radius}m</span>
-                    </div>
-                    <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
-                      <button
-                        onClick={() => {
-                          setIsProgrammingSafeZone(true);
-                          setEditingSafeZoneId(zone.id);
-                          setNewZoneName(zone.name);
-                          setNewZoneRadius(zone.radius);
-                          setNewZoneLat(zone.latitude);
-                          setNewZoneLng(zone.longitude);
-                          setNewZoneChildId(zone.child_id);
-                          setIsAutoCentering(false);
-                          setIsMenuOpen(false);
-                        }}
-                        className="glass-btn secondary"
-                        style={{ flex: 1, padding: '4px', fontSize: '11px' }}
-                      >
-                        Editar
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (window.confirm(`¿Seguro que deseas eliminar la zona "${zone.name}"?`)) {
-                            deleteSafeZone(zone.id);
-                          }
-                        }}
-                        className="glass-btn secondary"
-                        style={{ flex: 1, padding: '4px', fontSize: '11px', color: '#fca5a5', borderColor: 'rgba(239, 68, 68, 0.2)' }}
-                      >
-                        Eliminar
-                      </button>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
+          {safeZoneSubMenu === 'menu' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <button 
+                onClick={() => setSafeZoneSubMenu('create_select_child')}
+                className="glass-btn primary"
+                style={{ width: '100%', padding: '10px', fontSize: '12px', background: '#ec4899', borderColor: '#ec4899', color: 'white', fontWeight: 'bold' }}
+              >
+                ✏️ Programar Zona Segura
+              </button>
+              <button 
+                onClick={() => setSafeZoneSubMenu('manage')}
+                className="glass-btn secondary"
+                style={{ width: '100%', padding: '10px', fontSize: '12px' }}
+              >
+                ⚙️ Activar / Gestionar Zonas
+              </button>
+            </div>
+          )}
+
+          {safeZoneSubMenu === 'create_select_child' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', textAlign: 'left' }}>
+              <label style={{ fontSize: '12px', opacity: 0.8 }}>Selecciona un familiar:</label>
+              <select
+                value={newZoneChildId}
+                onChange={(e) => setNewZoneChildId(e.target.value)}
+                className="glass-input"
+                style={{ margin: 0, fontSize: '13px', padding: '8px', background: 'rgba(30, 27, 75, 0.95)', color: 'white', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', width: '100%' }}
+              >
+                <option value="" disabled>Seleccionar un hijo...</option>
+                {Object.entries(clients)
+                  .filter(([_, c]) => c.role === 'client')
+                  .map(([id, c]) => (
+                    <option key={id} value={id}>{c.name}</option>
+                  ))
+                }
+              </select>
+
+              <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                <button
+                  onClick={() => {
+                    if (!newZoneChildId) {
+                      alert("Por favor, selecciona un familiar.");
+                      return;
+                    }
+                    setIsProgrammingSafeZone(true);
+                    setEditingSafeZoneId(null);
+                    setNewZoneName('');
+                    setNewZoneRadius(100);
+                    setNewZoneLat(null);
+                    setNewZoneLng(null);
+                    setIsAutoCentering(false);
+                    setIsMenuOpen(false);
+                    showToast("📍 Modo libre: Navega por el mapa y mantén presionado (1-2s) para ubicar el centro.");
+                  }}
+                  className="glass-btn primary"
+                  style={{ flex: 1, padding: '8px', fontSize: '11px', background: '#ec4899', borderColor: '#ec4899', color: 'white' }}
+                >
+                  Comenzar
+                </button>
+                <button
+                  onClick={() => setSafeZoneSubMenu('menu')}
+                  className="glass-btn secondary"
+                  style={{ flex: 1, padding: '8px', fontSize: '11px' }}
+                >
+                  Atrás
+                </button>
+              </div>
+            </div>
+          )}
+
+          {safeZoneSubMenu === 'manage' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '12px', opacity: 0.8 }}>Zonas registradas:</span>
+                <button 
+                  onClick={() => setSafeZoneSubMenu('menu')} 
+                  style={{ background: 'none', border: 'none', color: '#f472b6', fontSize: '11px', cursor: 'pointer', padding: 0 }}
+                >
+                  Volver
+                </button>
+              </div>
+
+              {/* List of safe zones */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '220px', overflowY: 'auto', paddingRight: '4px' }}>
+                {safeZones.length === 0 ? (
+                  <p style={{ fontSize: '12px', opacity: 0.5, textAlign: 'center', margin: '8px 0' }}>No hay zonas configuradas</p>
+                ) : (
+                  safeZones.map(zone => {
+                    const childName = clients[zone.child_id]?.name || 'Hijo';
+                    return (
+                      <div key={zone.id} style={{ display: 'flex', flexDirection: 'column', gap: '4px', background: 'rgba(255,255,255,0.03)', padding: '10px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#f472b6', textAlign: 'left' }}>
+                            Zona segura de {childName}
+                          </span>
+                          <input 
+                            type="checkbox" 
+                            checked={zone.is_active}
+                            onChange={(e) => toggleSafeZone(zone.id, e.target.checked)}
+                            style={{ accentColor: '#ec4899', cursor: 'pointer' }}
+                            title={zone.is_active ? "Desactivar zona" : "Activar zona"}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', opacity: 0.8 }}>
+                          <span style={{ fontWeight: '600', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '140px', textAlign: 'left' }}>
+                            {zone.name}
+                          </span>
+                          <span>Radio: {zone.radius}m</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                          <button
+                            onClick={() => {
+                              setIsProgrammingSafeZone(true);
+                              setEditingSafeZoneId(zone.id);
+                              setNewZoneName(zone.name);
+                              setNewZoneRadius(zone.radius);
+                              setNewZoneLat(zone.latitude);
+                              setNewZoneLng(zone.longitude);
+                              setNewZoneChildId(zone.child_id);
+                              setIsAutoCentering(false);
+                              setIsMenuOpen(false);
+                              showToast("✏️ Editando zona. Mantén pulsado el mapa para reubicar si lo deseas.");
+                            }}
+                            className="glass-btn secondary"
+                            style={{ flex: 1, padding: '4px', fontSize: '11px' }}
+                          >
+                            Editar
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (window.confirm(`¿Seguro que deseas eliminar la zona "${zone.name}" de ${childName}?`)) {
+                                deleteSafeZone(zone.id);
+                              }
+                            }}
+                            className="glass-btn secondary"
+                            style={{ flex: 1, padding: '4px', fontSize: '11px', color: '#fca5a5', borderColor: 'rgba(239, 68, 68, 0.2)' }}
+                          >
+                            Eliminar
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         <div style={{ marginBottom: '32px' }}>
