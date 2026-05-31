@@ -5,7 +5,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useStore, playTonalSound, type ChatMessage } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { QRCode } from 'react-qr-code';
-import { Menu, X, QrCode, LogOut, AlertCircle, ShieldAlert, Smartphone, MessageSquare, Send, Mic, Bell, Camera, Sun, Moon, Image, Clock, Zap, Battery } from 'lucide-react';
+import { Menu, X, QrCode, LogOut, AlertCircle, ShieldAlert, Smartphone, MessageSquare, Send, Mic, Bell, Camera, Sun, Moon, Image, Clock, Zap, Battery, ArrowLeft } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
 import { supabase } from '../supabaseClient';
 import { AgIsotype, AgLogoFull } from '../components/BrandLogo';
@@ -82,7 +82,7 @@ const safeZoneIcon = L.divIcon({
 });
 
 export default function MonitorDashboard() {
-  const [showQR, setShowQR] = useState(false);
+  const [sidebarView, setSidebarView] = useState<'main' | 'qr' | 'zones'>('main');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   
   const { 
@@ -1521,365 +1521,443 @@ export default function MonitorDashboard() {
 
       {isMenuOpen && <div className="side-menu-overlay" onClick={() => setIsMenuOpen(false)} />}
       <div className={`side-menu ${isMenuOpen ? 'open' : ''}`}>
-        <div className="menu-header" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-            <h2 style={{ fontSize: '18px', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}><ShieldAlert size={20} color="#ec4899" />Radar Familiar</h2>
-            <button className="icon-btn" onClick={() => setIsMenuOpen(false)} style={{ marginRight: '-8px' }}><X size={24} /></button>
-          </div>
-          <div style={{ paddingLeft: '4px', width: '100%', marginTop: '4px' }}>
-            <AgLogoFull size={40} />
-          </div>
-        </div>
-        
-        <div style={{ marginBottom: '32px' }}>
-          <p style={{ fontSize: '11px', opacity: 0.5, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>Dispositivos</p>
-          {Object.values(clients).length === 0 ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', opacity: 0.7 }}>
-              <Smartphone size={20} />
-              <span style={{ fontSize: '14px' }}>Aún no hay hijos conectados</span>
+        {sidebarView === 'main' && (
+          <>
+            <div className="menu-header" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                <h2 style={{ fontSize: '18px', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}><ShieldAlert size={20} color="#ec4899" />Radar Familiar</h2>
+                <button className="icon-btn" onClick={() => setIsMenuOpen(false)} style={{ marginRight: '-8px' }}><X size={24} /></button>
+              </div>
+              <div style={{ paddingLeft: '4px', width: '100%', marginTop: '4px' }}>
+                <AgLogoFull size={40} />
+              </div>
             </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {Object.entries(clients).map(([id, c]) => (
-                <div key={id} style={{ background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.06)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-                    {c.avatar ? (
-                      <img src={c.avatar} alt={c.name} style={{ width: '32px', height: '32px', borderRadius: '50%', objectFit: 'cover' }} />
-                    ) : (
-                      <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#a78bfa', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{(c.name || '?').charAt(0).toUpperCase()}</div>
-                    )}
-                    <div style={{ flex: 1, textAlign: 'left' }}>
-                      <span style={{ fontSize: '14px', fontWeight: 'bold', display: 'block' }}>{c.name}</span>
-                      <span style={{ fontSize: '11px', opacity: 0.6 }}>
-                        {c.isOnline ? 'En línea (Nube)' : 'Desconectado'}
-                        {c.role === 'client' && ` • 🔋 ${c.battery_level !== undefined ? c.battery_level : 100}%${c.battery_charging ? '⚡' : ''}`}
-                      </span>
-                    </div>
-                    <div className={c.isOnline ? 'led-green' : 'led-red'} style={{ width: '8px', height: '8px', borderRadius: '50%' }}></div>
-                  </div>
-                  
-                  {/* Remote tracking / battery toggle (2-tap workflow) */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
-                    {expandedTrackingMenuId === id ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', background: 'rgba(0,0,0,0.2)', padding: '8px', borderRadius: '12px' }}>
-                        <span style={{ fontSize: '11px', opacity: 0.8, textAlign: 'left', fontWeight: 'bold', color: '#a78bfa' }}>⏰ Establecer límite de rastreo:</span>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                          {[
-                            { label: '30m', mins: 30 },
-                            { label: '1h', mins: 60 },
-                            { label: '2h', mins: 120 },
-                            { label: '4h', mins: 240 },
-                            { label: 'Manual', mins: null }
-                          ].map((opt) => (
+            
+            <div style={{ marginBottom: '24px' }}>
+              <p style={{ fontSize: '11px', opacity: 0.5, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>Dispositivos</p>
+              {Object.values(clients).length === 0 ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', opacity: 0.7 }}>
+                  <Smartphone size={20} />
+                  <span style={{ fontSize: '14px' }}>Aún no hay hijos conectados</span>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {Object.entries(clients).map(([id, c]) => (
+                    <div key={id} style={{ background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+                        {c.avatar ? (
+                          <img src={c.avatar} alt={c.name} style={{ width: '32px', height: '32px', borderRadius: '50%', objectFit: 'cover' }} />
+                        ) : (
+                          <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#a78bfa', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{(c.name || '?').charAt(0).toUpperCase()}</div>
+                        )}
+                        <div style={{ flex: 1, textAlign: 'left' }}>
+                          <span style={{ fontSize: '14px', fontWeight: 'bold', display: 'block' }}>{c.name}</span>
+                          <span style={{ fontSize: '11px', opacity: 0.6 }}>
+                            {c.isOnline ? 'En línea (Nube)' : 'Desconectado'}
+                            {c.role === 'client' && ` • 🔋 ${c.battery_level !== undefined ? c.battery_level : 100}%${c.battery_charging ? '⚡' : ''}`}
+                          </span>
+                        </div>
+                        <div className={c.isOnline ? 'led-green' : 'led-red'} style={{ width: '8px', height: '8px', borderRadius: '50%' }}></div>
+                      </div>
+                      
+                      {/* Remote tracking / battery toggle (2-tap workflow) */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
+                        {expandedTrackingMenuId === id ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', background: 'rgba(0,0,0,0.2)', padding: '8px', borderRadius: '12px' }}>
+                            <span style={{ fontSize: '11px', opacity: 0.8, textAlign: 'left', fontWeight: 'bold', color: '#a78bfa' }}>⏰ Establecer límite de rastreo:</span>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                              {[
+                                { label: '30m', mins: 30 },
+                                { label: '1h', mins: 60 },
+                                { label: '2h', mins: 120 },
+                                { label: '4h', mins: 240 },
+                                { label: 'Manual', mins: null }
+                              ].map((opt) => (
+                                <button
+                                  key={opt.label}
+                                  type="button"
+                                  onClick={async () => {
+                                    const expiresAt = opt.mins 
+                                      ? new Date(Date.now() + opt.mins * 60000).toISOString() 
+                                      : null;
+                                    setExpandedTrackingMenuId(null);
+                                    await handleToggleTrackingWithExpiry(id, true, expiresAt);
+                                  }}
+                                  className="glass-btn secondary"
+                                  style={{ fontSize: '10px', padding: '6px', flex: '1 0 30%', background: 'rgba(255,255,255,0.05)' }}
+                                >
+                                  {opt.label}
+                                </button>
+                              ))}
+                            </div>
                             <button
-                              key={opt.label}
                               type="button"
-                              onClick={async () => {
-                                const expiresAt = opt.mins 
-                                  ? new Date(Date.now() + opt.mins * 60000).toISOString() 
-                                  : null;
-                                setExpandedTrackingMenuId(null);
-                                await handleToggleTrackingWithExpiry(id, true, expiresAt);
+                              onClick={() => setExpandedTrackingMenuId(null)}
+                              className="glass-btn secondary"
+                              style={{ fontSize: '10px', padding: '4px', marginTop: '4px', borderColor: 'rgba(255,255,255,0.1)' }}
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button 
+                              onClick={() => {
+                                const isActive = c.tracking_enabled !== false;
+                                if (isActive) {
+                                  // Direct toggle off in 1 tap
+                                  handleToggleTrackingWithExpiry(id, false, null);
+                                } else {
+                                  // Open duration selector
+                                  setExpandedTrackingMenuId(id);
+                                }
                               }}
                               className="glass-btn secondary"
-                              style={{ fontSize: '10px', padding: '6px', flex: '1 0 30%', background: 'rgba(255,255,255,0.05)' }}
+                              style={{ 
+                                fontSize: '11px', 
+                                padding: '6px 10px', 
+                                flex: 1, 
+                                display: 'flex', 
+                                alignItems: 'center', 
+                                justifyContent: 'center', 
+                                gap: '4px',
+                                background: c.tracking_enabled !== false ? 'rgba(74, 222, 128, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                                borderColor: c.tracking_enabled !== false ? 'rgba(74, 222, 128, 0.3)' : 'rgba(239, 68, 68, 0.3)',
+                                color: c.tracking_enabled !== false ? '#4ade80' : '#fca5a5'
+                              }}
+                              title={c.tracking_enabled !== false ? "Pausar rastreo GPS remotely (Ahorrar batería)" : "Establecer duración del rastreo GPS"}
                             >
-                              {opt.label}
+                              {c.tracking_enabled !== false ? <Zap size={11} className="animate-pulse" /> : <Battery size={11} />}
+                              <span>
+                                {c.tracking_enabled !== false 
+                                  ? `GPS: Activo (${getRemainingTimeText(c.tracking_expires_at)})` 
+                                  : 'GPS: Suspendido'}
+                              </span>
                             </button>
-                          ))}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setExpandedTrackingMenuId(null)}
-                          className="glass-btn secondary"
-                          style={{ fontSize: '10px', padding: '4px', marginTop: '4px', borderColor: 'rgba(255,255,255,0.1)' }}
-                        >
-                          Cancelar
-                        </button>
+                            <button 
+                              onClick={() => {
+                                setSelectedChildForHistory({ id, name: c.name });
+                                setIsHistoryModalOpen(true);
+                              }}
+                              className="glass-btn secondary"
+                              style={{ fontSize: '11px', padding: '6px 10px', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
+                            >
+                              <Clock size={12} /> Ver Ruta
+                            </button>
+                          </div>
+                        )}
                       </div>
-                    ) : (
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button 
-                          onClick={() => {
-                            const isActive = c.tracking_enabled !== false;
-                            if (isActive) {
-                              // Direct toggle off in 1 tap
-                              handleToggleTrackingWithExpiry(id, false, null);
-                            } else {
-                              // Open duration selector
-                              setExpandedTrackingMenuId(id);
-                            }
-                          }}
-                          className="glass-btn secondary"
-                          style={{ 
-                            fontSize: '11px', 
-                            padding: '6px 10px', 
-                            flex: 1, 
-                            display: 'flex', 
-                            alignItems: 'center', 
-                            justifyContent: 'center', 
-                            gap: '4px',
-                            background: c.tracking_enabled !== false ? 'rgba(74, 222, 128, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                            borderColor: c.tracking_enabled !== false ? 'rgba(74, 222, 128, 0.3)' : 'rgba(239, 68, 68, 0.3)',
-                            color: c.tracking_enabled !== false ? '#4ade80' : '#fca5a5'
-                          }}
-                          title={c.tracking_enabled !== false ? "Pausar rastreo GPS remotely (Ahorrar batería)" : "Establecer duración del rastreo GPS"}
-                        >
-                          {c.tracking_enabled !== false ? <Zap size={11} className="animate-pulse" /> : <Battery size={11} />}
-                          <span>
-                            {c.tracking_enabled !== false 
-                              ? `GPS: Activo (${getRemainingTimeText(c.tracking_expires_at)})` 
-                              : 'GPS: Suspendido'}
-                          </span>
-                        </button>
-                        <button 
-                          onClick={() => {
-                            setSelectedChildForHistory({ id, name: c.name });
-                            setIsHistoryModalOpen(true);
-                          }}
-                          className="glass-btn secondary"
-                          style={{ fontSize: '11px', padding: '6px 10px', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
-                        >
-                          <Clock size={12} /> Ver Ruta
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
-          )}
-        </div>
 
-        {/* NUEVA GESTIÓN DE MÚLTIPLES ZONAS SEGURAS */}
-        <div style={{ marginBottom: '32px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <p style={{ fontSize: '11px', opacity: 0.5, textTransform: 'uppercase', letterSpacing: '1px', margin: 0 }}>Zonas Seguras</p>
-
-          {safeZoneSubMenu === 'menu' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <button 
-                onClick={() => setSafeZoneSubMenu('create_select_child')}
-                className="glass-btn primary"
-                style={{ width: '100%', padding: '10px', fontSize: '12px', background: '#ec4899', borderColor: '#ec4899', color: 'white', fontWeight: 'bold' }}
-              >
-                ✏️ Programar Zona Segura
-              </button>
-              <button 
-                onClick={() => setSafeZoneSubMenu('manage')}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '24px' }}>
+              <p style={{ fontSize: '11px', opacity: 0.5, textTransform: 'uppercase', letterSpacing: '1px', margin: 0, textAlign: 'left' }}>Configuración</p>
+              
+              <button
+                onClick={() => {
+                  setSidebarView('zones');
+                  setSafeZoneSubMenu('menu');
+                }}
                 className="glass-btn secondary"
-                style={{ width: '100%', padding: '10px', fontSize: '12px' }}
+                style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: '10px', padding: '12px 16px', fontSize: '13px', background: 'rgba(236,72,153,0.05)', borderColor: 'rgba(236,72,153,0.2)', color: '#f472b6' }}
               >
-                ⚙️ Activar / Gestionar Zonas
+                <ShieldAlert size={16} /> 📍 Gestionar Zonas Seguras
+              </button>
+
+              <button
+                onClick={() => setSidebarView('qr')}
+                className="glass-btn secondary"
+                style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: '10px', padding: '12px 16px', fontSize: '13px', background: 'rgba(139,92,246,0.05)', borderColor: 'rgba(139,92,246,0.2)', color: '#a78bfa' }}
+              >
+                <QrCode size={16} /> 🔗 Vincular Nuevo Dispositivo
               </button>
             </div>
-          )}
 
-          {safeZoneSubMenu === 'create_select_child' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', textAlign: 'left' }}>
-              <label style={{ fontSize: '12px', opacity: 0.8 }}>Selecciona un familiar:</label>
-              <select
-                value={newZoneChildId}
-                onChange={(e) => setNewZoneChildId(e.target.value)}
-                className="glass-input"
-                style={{ margin: 0, fontSize: '13px', padding: '8px', background: 'rgba(30, 27, 75, 0.95)', color: 'white', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', width: '100%' }}
-              >
-                <option value="" disabled>Seleccionar un hijo...</option>
-                {Object.entries(clients)
-                  .filter(([_, c]) => c.role === 'client')
-                  .map(([id, c]) => (
-                    <option key={id} value={id}>{c.name}</option>
-                  ))
-                }
-              </select>
-
-              <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
-                <button
-                  onClick={() => {
-                    if (!newZoneChildId) {
-                      alert("Por favor, selecciona un familiar.");
-                      return;
-                    }
-                    setIsProgrammingSafeZone(true);
-                    setEditingSafeZoneId(null);
-                    setNewZoneName('');
-                    setNewZoneRadius(100);
-                    setNewZoneLat(null);
-                    setNewZoneLng(null);
-                    setIsAutoCentering(false);
-                    setIsMenuOpen(false);
-                    showToast("📍 Modo libre: Navega por el mapa y mantén presionado (1-2s) para ubicar el centro.");
-                  }}
-                  className="glass-btn primary"
-                  style={{ flex: 1, padding: '8px', fontSize: '11px', background: '#ec4899', borderColor: '#ec4899', color: 'white' }}
-                >
-                  Comenzar
-                </button>
-                <button
-                  onClick={() => setSafeZoneSubMenu('menu')}
-                  className="glass-btn secondary"
-                  style={{ flex: 1, padding: '8px', fontSize: '11px' }}
-                >
-                  Atrás
-                </button>
-              </div>
-            </div>
-          )}
-
-          {safeZoneSubMenu === 'manage' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '12px', opacity: 0.8 }}>Zonas registradas:</span>
-                <button 
-                  onClick={() => setSafeZoneSubMenu('menu')} 
-                  style={{ background: 'none', border: 'none', color: '#f472b6', fontSize: '11px', cursor: 'pointer', padding: 0 }}
-                >
-                  Volver
-                </button>
-              </div>
-
-              {/* List of safe zones */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '220px', overflowY: 'auto', paddingRight: '4px' }}>
-                {safeZones.length === 0 ? (
-                  <p style={{ fontSize: '12px', opacity: 0.5, textAlign: 'center', margin: '8px 0' }}>No hay zonas configuradas</p>
+            <div style={{ marginTop: 'auto', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '4px' }}>
+                {avatarBase64 ? (
+                  <img src={avatarBase64} alt={userName} style={{ width: '40px', height: '40px', borderRadius: '50%', objectFit: 'cover', border: '2px solid #8b5cf6' }} />
                 ) : (
-                  safeZones.map(zone => {
-                    const childName = clients[zone.child_id]?.name || 'Hijo';
-                    return (
-                      <div key={zone.id} style={{ display: 'flex', flexDirection: 'column', gap: '4px', background: 'rgba(255,255,255,0.03)', padding: '10px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#f472b6', textAlign: 'left' }}>
-                            Zona segura de {childName}
-                          </span>
-                          <input 
-                            type="checkbox" 
-                            checked={zone.is_active}
-                            onChange={(e) => toggleSafeZone(zone.id, e.target.checked)}
-                            style={{ accentColor: '#ec4899', cursor: 'pointer' }}
-                            title={zone.is_active ? "Desactivar zona" : "Activar zona"}
-                          />
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', opacity: 0.8 }}>
-                          <span style={{ fontWeight: '600', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '140px', textAlign: 'left' }}>
-                            {zone.name}
-                          </span>
-                          <span>Radio: {zone.radius}m</span>
-                        </div>
-                        <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
-                          <button
-                            onClick={() => {
-                              setIsProgrammingSafeZone(true);
-                              setEditingSafeZoneId(zone.id);
-                              setNewZoneName(zone.name);
-                              setNewZoneRadius(zone.radius);
-                              setNewZoneLat(zone.latitude);
-                              setNewZoneLng(zone.longitude);
-                              setNewZoneChildId(zone.child_id);
-                              setIsAutoCentering(false);
-                              setIsMenuOpen(false);
-                              showToast("✏️ Editando zona. Mantén pulsado el mapa para reubicar si lo deseas.");
-                            }}
-                            className="glass-btn secondary"
-                            style={{ flex: 1, padding: '4px', fontSize: '11px' }}
-                          >
-                            Editar
-                          </button>
-                          <button
-                            onClick={() => {
-                              if (window.confirm(`¿Seguro que deseas eliminar la zona "${zone.name}" de ${childName}?`)) {
-                                deleteSafeZone(zone.id);
-                              }
-                            }}
-                            className="glass-btn secondary"
-                            style={{ flex: 1, padding: '4px', fontSize: '11px', color: '#fca5a5', borderColor: 'rgba(239, 68, 68, 0.2)' }}
-                          >
-                            Eliminar
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })
+                  <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#8b5cf6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '16px' }}>{userName.charAt(0).toUpperCase()}</div>
                 )}
+                <div style={{ flex: 1, textAlign: 'left' }}>
+                  <p style={{ fontSize: '14px', fontWeight: 'bold', margin: 0 }}>{userName}</p>
+                  <p style={{ fontSize: '12px', opacity: 0.6, margin: 0 }}>Tutor Principal (Padre)</p>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {updateAvailable ? (
+                  <a 
+                    href={latestReleaseUrl} 
+                    target="_blank" 
+                    rel="noreferrer"
+                    className="glass-btn" 
+                    style={{ background: 'rgba(236,72,153,0.2)', border: '1px solid #ec4899', color: '#f472b6', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '10px 14px', fontSize: '13px' }}
+                  >
+                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f472b6', animation: 'pulse 1s infinite' }} />
+                    ¡Nueva Versión {updateAvailable} Lista!
+                  </a>
+                ) : (
+                  <button 
+                    onClick={() => checkUpdates()} 
+                    disabled={isCheckingUpdates}
+                    className="glass-btn secondary" 
+                    style={{ fontSize: '13px', padding: '10px 14px' }}
+                  >
+                    {isCheckingUpdates ? 'Buscando...' : 'Buscar Actualización'}
+                  </button>
+                )}
+
+                {updateCheckResult === 'no_updates' && (
+                  <p style={{ fontSize: '11px', color: '#4ade80', margin: '4px 0 0 0' }}>✓ La aplicación está al día v1.0.0</p>
+                )}
+                {updateCheckResult === 'error' && (
+                  <p style={{ fontSize: '11px', color: '#fca5a5', margin: '4px 0 0 0' }}>❌ Error al consultar actualizaciones.</p>
+                )}
+
+                <button 
+                  className="glass-btn secondary" 
+                  style={{ border: '1px solid rgba(239, 68, 68, 0.3)', color: '#fca5a5', background: 'rgba(239, 68, 68, 0.05)', fontSize: '13px', padding: '10px 14px' }}
+                  onClick={() => setIsUnlinkModalOpen(true)}
+                >
+                  <LogOut size={16} /> Cerrar Sesión
+                </button>
+              </div>
+
+              <div style={{ marginTop: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', opacity: 0.6 }}>
+                <span style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 600 }}>Desarrollado por</span>
+                <span style={{ fontSize: '12px', color: '#fb923c', fontWeight: 'bold', textShadow: '0 0 8px rgba(251, 146, 60, 0.2)' }}>Adelio González</span>
               </div>
             </div>
-          )}
-        </div>
+          </>
+        )}
 
-        <div style={{ marginBottom: '32px' }}>
-          <button 
-            className="glass-btn secondary" 
-            onClick={() => setShowQR(!showQR)} 
-            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '10px 14px', fontSize: '13px' }}
-          >
-            <QrCode size={16} /> {showQR ? 'Ocultar QR' : 'Mostrar QR para Vincular'}
-          </button>
-          
-          {showQR && familyCode && (
-            <div style={{ marginTop: '16px', background: 'white', padding: '16px', borderRadius: '16px', display: 'inline-block', boxShadow: '0 4px 20px rgba(0,0,0,0.2)' }}>
-              <QRCode value={familyCode} size={150} />
-              <p style={{ color: 'black', fontSize: '10px', margin: '8px 0 0 0', wordBreak: 'break-all' }}>ID: {familyCode}</p>
-            </div>
-          )}
-        </div>
-
-        {/* Sección "Mi Perfil y Aplicación" */}
-        <div style={{ marginTop: 'auto', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '4px' }}>
-            {avatarBase64 ? (
-              <img src={avatarBase64} alt={userName} style={{ width: '40px', height: '40px', borderRadius: '50%', objectFit: 'cover', border: '2px solid #8b5cf6' }} />
-            ) : (
-              <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#8b5cf6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '16px' }}>{userName.charAt(0).toUpperCase()}</div>
-            )}
-            <div style={{ flex: 1, textAlign: 'left' }}>
-              <p style={{ fontSize: '14px', fontWeight: 'bold', margin: 0 }}>{userName}</p>
-              <p style={{ fontSize: '12px', opacity: 0.6, margin: 0 }}>Tutor Principal (Padre)</p>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {updateAvailable ? (
-              <a 
-                href={latestReleaseUrl} 
-                target="_blank" 
-                rel="noreferrer"
-                className="glass-btn" 
-                style={{ background: 'rgba(236,72,153,0.2)', border: '1px solid #ec4899', color: '#f472b6', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '10px 14px', fontSize: '13px' }}
-              >
-                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f472b6', animation: 'pulse 1s infinite' }} />
-                ¡Nueva Versión {updateAvailable} Lista!
-              </a>
-            ) : (
+        {sidebarView === 'qr' && (
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            <div className="menu-header" style={{ display: 'flex', alignItems: 'center', gap: '12px', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '16px', marginBottom: '24px' }}>
               <button 
-                onClick={() => checkUpdates()} 
-                disabled={isCheckingUpdates}
-                className="glass-btn secondary" 
-                style={{ fontSize: '13px', padding: '10px 14px' }}
+                onClick={() => setSidebarView('main')}
+                className="icon-btn" 
+                style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '50%', padding: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               >
-                {isCheckingUpdates ? 'Buscando...' : 'Buscar Actualización'}
+                <ArrowLeft size={20} />
               </button>
-            )}
+              <h2 style={{ fontSize: '16px', margin: 0, fontWeight: 'bold', color: 'white' }}>Vincular Dispositivo</h2>
+            </div>
 
-            {updateCheckResult === 'no_updates' && (
-              <p style={{ fontSize: '11px', color: '#4ade80', margin: '4px 0 0 0' }}>✓ La aplicación está al día v1.0.0</p>
-            )}
-            {updateCheckResult === 'error' && (
-              <p style={{ fontSize: '11px', color: '#fca5a5', margin: '4px 0 0 0' }}>❌ Error al consultar actualizaciones.</p>
-            )}
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '20px' }}>
+              <p style={{ fontSize: '13px', opacity: 0.8, textAlign: 'center', margin: 0, padding: '0 8px' }}>
+                Escanea este código QR desde el dispositivo móvil de tu hijo para vincularlo a tu grupo familiar:
+              </p>
+
+              {familyCode ? (
+                <div style={{ background: 'white', padding: '16px', borderRadius: '24px', display: 'inline-block', boxShadow: '0 8px 32px rgba(0,0,0,0.4)', border: '2px solid rgba(255,255,255,0.1)' }}>
+                  <QRCode value={familyCode} size={180} />
+                </div>
+              ) : (
+                <div style={{ opacity: 0.5, fontSize: '14px' }}>Cargando código de familia...</div>
+              )}
+
+              <div style={{ width: '100%', background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)', boxSizing: 'border-box' }}>
+                <span style={{ fontSize: '11px', opacity: 0.5, display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>Código de Vinculación Manual</span>
+                <strong style={{ fontSize: '16px', color: '#a78bfa', fontFamily: 'monospace', letterSpacing: '1px', wordBreak: 'break-all' }}>{familyCode || '---'}</strong>
+              </div>
+            </div>
 
             <button 
-              className="glass-btn secondary" 
-              style={{ border: '1px solid rgba(239, 68, 68, 0.3)', color: '#fca5a5', background: 'rgba(239, 68, 68, 0.05)', fontSize: '13px', padding: '10px 14px' }}
-              onClick={() => setIsUnlinkModalOpen(true)}
+              onClick={() => setSidebarView('main')}
+              className="glass-btn primary"
+              style={{ marginTop: 'auto', width: '100%', padding: '12px', fontSize: '13px', background: '#8b5cf6', borderColor: '#8b5cf6' }}
             >
-              <LogOut size={16} /> Cerrar Sesión
+              Volver al Menú Principal
             </button>
           </div>
+        )}
 
-          {/* Footer credits inside the sidebar */}
-          <div style={{ marginTop: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', opacity: 0.6 }}>
-            <span style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 600 }}>Desarrollado por</span>
-            <span style={{ fontSize: '12px', color: '#fb923c', fontWeight: 'bold', textShadow: '0 0 8px rgba(251, 146, 60, 0.2)' }}>Adelio González</span>
+        {sidebarView === 'zones' && (
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            <div className="menu-header" style={{ display: 'flex', alignItems: 'center', gap: '12px', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '16px', marginBottom: '24px' }}>
+              <button 
+                onClick={() => {
+                  if (safeZoneSubMenu !== 'menu') {
+                    setSafeZoneSubMenu('menu');
+                  } else {
+                    setSidebarView('main');
+                  }
+                }}
+                className="icon-btn" 
+                style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '50%', padding: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <ArrowLeft size={20} />
+              </button>
+              <h2 style={{ fontSize: '16px', margin: 0, fontWeight: 'bold', color: 'white' }}>
+                {safeZoneSubMenu === 'create_select_child' ? 'Programar Zona' : safeZoneSubMenu === 'manage' ? 'Gestionar Zonas' : 'Zonas Seguras'}
+              </h2>
+            </div>
+
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {safeZoneSubMenu === 'menu' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', justifyContent: 'center', flex: 1 }}>
+                  <p style={{ fontSize: '13px', opacity: 0.8, textAlign: 'center', marginBottom: '16px' }}>
+                    Las zonas seguras te avisan de forma instantánea cuando tus hijos entran o salen de áreas de interés.
+                  </p>
+                  <button 
+                    onClick={() => setSafeZoneSubMenu('create_select_child')}
+                    className="glass-btn primary"
+                    style={{ width: '100%', padding: '14px 16px', fontSize: '13px', background: '#ec4899', borderColor: '#ec4899', color: 'white', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                  >
+                    ✏️ Programar Nueva Zona
+                  </button>
+                  <button 
+                    onClick={() => setSafeZoneSubMenu('manage')}
+                    className="glass-btn secondary"
+                    style={{ width: '100%', padding: '14px 16px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                  >
+                    ⚙️ Activar / Gestionar Zonas ({safeZones.length})
+                  </button>
+                </div>
+              )}
+
+              {safeZoneSubMenu === 'create_select_child' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', textAlign: 'left' }}>
+                  <p style={{ fontSize: '13px', opacity: 0.8, margin: 0 }}>
+                    Selecciona para cuál de tus hijos deseas crear una nueva zona segura:
+                  </p>
+                  
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={{ fontSize: '11px', opacity: 0.5, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Familiar:</label>
+                    <select
+                      value={newZoneChildId}
+                      onChange={(e) => setNewZoneChildId(e.target.value)}
+                      className="glass-input"
+                      style={{ margin: 0, fontSize: '14px', padding: '10px', background: 'rgba(30, 27, 75, 0.95)', color: 'white', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '10px', width: '100%' }}
+                    >
+                      <option value="" disabled>Seleccionar un hijo...</option>
+                      {Object.entries(clients)
+                        .filter(([_, c]) => c.role === 'client')
+                        .map(([id, c]) => (
+                          <option key={id} value={id}>{c.name}</option>
+                        ))
+                      }
+                    </select>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+                    <button
+                      onClick={() => {
+                        if (!newZoneChildId) {
+                          alert("Por favor, selecciona un familiar.");
+                          return;
+                        }
+                        setIsProgrammingSafeZone(true);
+                        setEditingSafeZoneId(null);
+                        setNewZoneName('');
+                        setNewZoneRadius(100);
+                        setNewZoneLat(null);
+                        setNewZoneLng(null);
+                        setIsAutoCentering(false);
+                        setIsMenuOpen(false);
+                        showToast("📍 Modo libre: Navega por el mapa y mantén presionado (1-2s) para ubicar el centro.");
+                      }}
+                      className="glass-btn primary"
+                      style={{ flex: 1, padding: '12px', fontSize: '13px', background: '#ec4899', borderColor: '#ec4899', color: 'white', fontWeight: 'bold' }}
+                    >
+                      Siguiente
+                    </button>
+                    <button
+                      onClick={() => setSafeZoneSubMenu('menu')}
+                      className="glass-btn secondary"
+                      style={{ flex: 1, padding: '12px', fontSize: '13px' }}
+                    >
+                      Atrás
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {safeZoneSubMenu === 'manage' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', height: '100%' }}>
+                  <span style={{ fontSize: '12px', opacity: 0.8, textAlign: 'left' }}>Listado de zonas configuradas:</span>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: 'calc(100vh - 240px)', overflowY: 'auto', paddingRight: '4px' }}>
+                    {safeZones.length === 0 ? (
+                      <p style={{ fontSize: '13px', opacity: 0.5, textAlign: 'center', margin: '32px 0' }}>Aún no has configurado ninguna zona segura.</p>
+                    ) : (
+                      safeZones.map(zone => {
+                        const childName = clients[zone.child_id]?.name || 'Hijo';
+                        return (
+                          <div key={zone.id} style={{ display: 'flex', flexDirection: 'column', gap: '6px', background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '14px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                              <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#f472b6', textAlign: 'left' }}>
+                                Zona de {childName}
+                              </span>
+                              <input 
+                                type="checkbox" 
+                                checked={zone.is_active}
+                                onChange={(e) => toggleSafeZone(zone.id, e.target.checked)}
+                                style={{ accentColor: '#ec4899', cursor: 'pointer', width: '16px', height: '16px' }}
+                                title={zone.is_active ? "Desactivar zona" : "Activar zona"}
+                              />
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', opacity: 0.8 }}>
+                              <span style={{ fontWeight: '600', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '140px', textAlign: 'left' }}>
+                                {zone.name}
+                              </span>
+                              <span>Radio: {zone.radius}m</span>
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                              <button
+                                onClick={() => {
+                                  setIsProgrammingSafeZone(true);
+                                  setEditingSafeZoneId(zone.id);
+                                  setNewZoneName(zone.name);
+                                  setNewZoneRadius(zone.radius);
+                                  setNewZoneLat(zone.latitude);
+                                  setNewZoneLng(zone.longitude);
+                                  setNewZoneChildId(zone.child_id);
+                                  setIsAutoCentering(false);
+                                  setIsMenuOpen(false);
+                                  showToast("✏️ Editando zona. Mantén pulsado el mapa para reubicar si lo deseas.");
+                                }}
+                                className="glass-btn secondary"
+                                style={{ flex: 1, padding: '6px', fontSize: '11px' }}
+                              >
+                                Editar
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (window.confirm(`¿Seguro que deseas eliminar la zona "${zone.name}" de ${childName}?`)) {
+                                    deleteSafeZone(zone.id);
+                                  }
+                                }}
+                                className="glass-btn secondary"
+                                style={{ flex: 1, padding: '6px', fontSize: '11px', color: '#fca5a5', borderColor: 'rgba(239, 68, 68, 0.2)' }}
+                              >
+                                Eliminar
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  <button
+                    onClick={() => setSafeZoneSubMenu('create_select_child')}
+                    className="glass-btn primary"
+                    style={{ width: '100%', padding: '12px', fontSize: '13px', background: '#ec4899', borderColor: '#ec4899', color: 'white', marginTop: 'auto' }}
+                  >
+                    ➕ Crear Nueva Zona Segura
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* LOGOUT CONFIRMATION MODAL */}
